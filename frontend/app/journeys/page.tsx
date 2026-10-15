@@ -8,13 +8,14 @@ import {
   dayNightTone, sourceTone, gradientFor,
 } from '@/lib/utils';
 import {
-  Card, CardHeader, Badge, Button, Input, Select, Label,
+  Card, Badge, Button, Input, Select, Label,
   PageHeader, Skeleton, EmptyState, Checkbox, ConfirmDialog, cn,
 } from '@/components/ui';
 import { JourneyPreviewModal } from '@/components/JourneyPreview';
 import {
   IconSearch, IconDownload, IconTrain, IconRoute, IconTrash, IconPencil,
   IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight, IconCheck, IconEye,
+  IconOpen, IconChevronDown,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
@@ -50,6 +51,7 @@ export default function JourneysPage() {
   useEffect(load, [filters]);
 
   const activeCount = Object.values(filters).filter(Boolean).length;
+  const advancedCount = Object.entries(filters).filter(([k, v]) => k !== 'search' && Boolean(v)).length;
 
   const allSelected = journeys.length > 0 && selected.length === journeys.length;
 
@@ -104,9 +106,6 @@ export default function JourneysPage() {
                 {allSelected ? 'Clear all' : 'Select all'}
               </Button>
             )}
-            <Button variant="secondary" onClick={() => setShowFilters((s) => !s)} className="lg:hidden">
-              <IconFilter /> Filters{activeCount > 0 && ` (${activeCount})`}
-            </Button>
             <Button variant="secondary" onClick={exportCsv}>
               <IconDownload /> Export CSV
             </Button>
@@ -117,52 +116,88 @@ export default function JourneysPage() {
         }
       />
 
-      {/* Filters */}
-      <Card className={cn('animate-fade-up', showFilters ? 'block' : 'hidden lg:block')}>
-        <CardHeader
-          title="Filters"
-          subtitle="Narrow down your journeys"
-          icon={<IconFilter />}
-          action={
-            activeCount > 0 ? (
+      {/* Search bar + advanced filters */}
+      <Card className="animate-fade-up">
+        <div className="flex flex-wrap items-center gap-3 p-4">
+          <div className="relative min-w-0 flex-1">
+            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-ink-400" />
+            <Input
+              className="pl-11 pr-10"
+              placeholder="Search train, station, PNR or passenger…"
+              value={filters.search}
+              onChange={(e) => set('search', e.target.value)}
+            />
+            {filters.search && (
               <button
-                onClick={() => setFilters(EMPTY_FILTERS)}
-                className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-700"
+                onClick={() => set('search', '')}
+                className="absolute right-3 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
+                aria-label="Clear search"
               >
-                <IconX className="text-[14px]" /> Clear all
+                <IconX className="text-[14px]" />
               </button>
-            ) : undefined
-          }
-        />
-        <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="sm:col-span-2 lg:col-span-1">
-            <Label>Search</Label>
-            <div className="relative">
-              <IconSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-              <Input className="pl-10" placeholder="Train, station, PNR…" value={filters.search} onChange={(e) => set('search', e.target.value)} />
+            )}
+          </div>
+
+          <Button
+            variant={showFilters ? 'primary' : 'secondary'}
+            onClick={() => setShowFilters((s) => !s)}
+          >
+            <IconFilter /> Advanced search
+            {advancedCount > 0 && (
+              <span className={cn(
+                'grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold',
+                showFilters ? 'bg-white/20 text-white' : 'bg-brand-100 text-brand-700',
+              )}>
+                {advancedCount}
+              </span>
+            )}
+            <IconChevronDown className={cn('text-[16px] transition-transform duration-200', showFilters && 'rotate-180')} />
+          </Button>
+
+          {activeCount > 0 && (
+            <button
+              onClick={() => setFilters(EMPTY_FILTERS)}
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-50 hover:text-brand-700"
+            >
+              <IconX className="text-[14px]" /> Clear all
+            </button>
+          )}
+        </div>
+
+        {showFilters && (
+          <div className="animate-fade-up border-t border-ink-100">
+            <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+              <div><Label>From station</Label><Input placeholder="e.g. Dhaka" value={filters.fromStation} onChange={(e) => set('fromStation', e.target.value)} /></div>
+              <div><Label>To station</Label><Input placeholder="e.g. Natore" value={filters.toStation} onChange={(e) => set('toStation', e.target.value)} /></div>
+              <div><Label>Train name</Label><Input placeholder="e.g. Ekota" value={filters.trainName} onChange={(e) => set('trainName', e.target.value)} /></div>
+              <div>
+                <Label>Chair class</Label>
+                <Select value={filters.chairType} onChange={(e) => set('chairType', e.target.value)}>
+                  <option value="">All classes</option>
+                  {CHAIR_TYPES.map((c) => <option key={c} value={c}>{chairClassLabel(c)}</option>)}
+                </Select>
+              </div>
+              <div>
+                <Label>Time of day</Label>
+                <Select value={filters.dayNight} onChange={(e) => set('dayNight', e.target.value)}>
+                  <option value="">Day & Night</option>
+                  <option value="DAY">Day</option>
+                  <option value="NIGHT">Night</option>
+                </Select>
+              </div>
+              <div><Label>From date</Label><Input type="date" value={filters.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
+              <div><Label>To date</Label><Input type="date" value={filters.endDate} onChange={(e) => set('endDate', e.target.value)} /></div>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-5 py-3">
+              <p className="text-xs text-ink-400">
+                {activeCount > 0 ? `${activeCount} filter${activeCount === 1 ? '' : 's'} active` : 'No advanced filters applied'}
+              </p>
+              <Button variant="ghost" size="sm" onClick={() => setShowFilters(false)}>
+                <IconChevronDown className="rotate-180 text-[16px]" /> Hide advanced
+              </Button>
             </div>
           </div>
-          <div><Label>From station</Label><Input placeholder="e.g. Dhaka" value={filters.fromStation} onChange={(e) => set('fromStation', e.target.value)} /></div>
-          <div><Label>To station</Label><Input placeholder="e.g. Natore" value={filters.toStation} onChange={(e) => set('toStation', e.target.value)} /></div>
-          <div><Label>Train name</Label><Input placeholder="e.g. Ekota" value={filters.trainName} onChange={(e) => set('trainName', e.target.value)} /></div>
-          <div>
-            <Label>Chair class</Label>
-            <Select value={filters.chairType} onChange={(e) => set('chairType', e.target.value)}>
-              <option value="">All classes</option>
-              {CHAIR_TYPES.map((c) => <option key={c} value={c}>{chairClassLabel(c)}</option>)}
-            </Select>
-          </div>
-          <div>
-            <Label>Time of day</Label>
-            <Select value={filters.dayNight} onChange={(e) => set('dayNight', e.target.value)}>
-              <option value="">Day & Night</option>
-              <option value="DAY">Day</option>
-              <option value="NIGHT">Night</option>
-            </Select>
-          </div>
-          <div><Label>From date</Label><Input type="date" value={filters.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
-          <div><Label>To date</Label><Input type="date" value={filters.endDate} onChange={(e) => set('endDate', e.target.value)} /></div>
-        </div>
+        )}
       </Card>
 
       {/* Results */}
@@ -249,6 +284,9 @@ export default function JourneysPage() {
                       <td className="px-5 py-3.5"><Badge tone={sourceTone(j.source)}>{j.source}</Badge></td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                          <Link href={`/journeys/${j.id}`} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="View">
+                            <IconOpen className="text-[16px]" />
+                          </Link>
                           <button onClick={() => setPreviewing(j)} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="Preview">
                             <IconEye className="text-[16px]" />
                           </button>
@@ -306,11 +344,14 @@ export default function JourneysPage() {
                   </div>
                 </div>
                 <div className="mt-3 flex gap-2 border-t border-ink-100 pt-3">
+                  <Link href={`/journeys/${j.id}`} className="flex-1">
+                    <Button variant="secondary" size="sm" className="w-full"><IconOpen className="text-[14px]" /> View</Button>
+                  </Link>
                   <Button variant="secondary" size="sm" onClick={() => setPreviewing(j)}>
                     <IconEye className="text-[14px]" /> Preview
                   </Button>
-                  <Link href={`/journeys/${j.id}?edit=1`} className="flex-1">
-                    <Button variant="secondary" size="sm" className="w-full"><IconPencil className="text-[14px]" /> Edit</Button>
+                  <Link href={`/journeys/${j.id}?edit=1`}>
+                    <Button variant="secondary" size="sm"><IconPencil className="text-[14px]" /> Edit</Button>
                   </Link>
                   <Button variant="ghost" size="sm" onClick={() => askDelete([j.id])} className="text-rose-600 hover:bg-rose-50">
                     <IconTrash className="text-[14px]" />

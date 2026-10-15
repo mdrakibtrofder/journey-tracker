@@ -207,4 +207,17 @@ export const IconEye = (p: IconProps) => (
   </Base>
 );
 
+export const IconOpen = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M13.5 4.5H19.5V10.5M19.5 4.5 11 13" />
+    <path d="M18 14.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3.5" />
+  </Base>
+);
+
+export const IconChevronDown = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m6 9.5 6 6 6-6" />
+  </Base>
+);
+
 
