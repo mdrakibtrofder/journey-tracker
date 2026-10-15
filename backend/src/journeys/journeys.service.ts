@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateJourneyDto, UpdateJourneyDto, QueryJourneyDto } from './dto/journey.dto';
 import { ChairType } from '@prisma/client';
@@ -43,9 +43,13 @@ export class JourneysService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateJourneyDto) {
-    const chairType = dto.chairType || mapChairType();
+    // An empty string is a real value for the unique ticketNo column, so two
+    // blank tickets would collide. Normalise blanks to null (Postgres allows
+    // many nulls) so only genuine duplicates are rejected.
+    const ticketNo = dto.ticketNo?.trim() || undefined;
     const data: any = {
       ...dto,
+      ticketNo,
       chairType: dto.chairType || ChairType.OTHER,
       dayNight: computeDayNight(dto.departureTime),
       durationMins: computeDuration(dto.departureTime, dto.arrivalTime),
@@ -53,7 +57,17 @@ export class JourneysService {
       fare: dto.fare ?? 0,
     };
     if (dto.issuedAt) data.issuedAt = new Date(dto.issuedAt);
-    return this.prisma.journey.create({ data });
+    try {
+      return await this.prisma.journey.create({ data });
+    } catch (e: any) {
+      // P2002 = unique constraint violation on ticketNo.
+      if (e?.code === 'P2002') {
+        throw new ConflictException(
+          `Ticket ${ticketNo} already exists — it was skipped.`,
+        );
+      }
+      throw e;
+    }
   }
 
   async findAll(query: QueryJourneyDto) {
