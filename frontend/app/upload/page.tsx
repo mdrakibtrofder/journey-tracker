@@ -2,13 +2,15 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, ParsedTicket, BulkParseResult } from '@/lib/api';
+import { api, ParsedTicket, BulkParseResult, DuplicateEntry, Journey } from '@/lib/api';
 import {
-  Card, Button, Input, Select, Label, PageHeader, Badge, cn,
+  Card, Button, Input, Select, Label, PageHeader, Badge, Modal, cn,
 } from '@/components/ui';
+import { JourneyPreviewModal } from '@/components/JourneyPreview';
 import {
   IconUpload, IconFile, IconCheck, IconX, IconSparkles, IconAlert,
   IconTrain, IconRoute, IconCalendar, IconWallet, IconTicket, IconSearch, IconTrash,
+  IconEye,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
@@ -57,6 +59,8 @@ export default function UploadPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [duplicates, setDuplicates] = useState<DuplicateEntry[] | null>(null);
+  const [preview, setPreview] = useState<Journey | null>(null);
 
   const valid = items.filter((i) => i.status === 'ready' && missingFields(i.parsed).length === 0);
   const invalid = items.filter((i) => i.status === 'error' || (i.status === 'ready' && missingFields(i.parsed).length > 0));
@@ -165,6 +169,8 @@ export default function UploadPage() {
     setItems([]);
     setError('');
     setNotice('');
+    setDuplicates(null);
+    setPreview(null);
   };
 
   const saveAll = async () => {
@@ -172,24 +178,41 @@ export default function UploadPage() {
     setSaving(true);
     setError('');
     setNotice('');
+    setDuplicates(null);
     try {
       const result = await api.confirmTickets(valid.map((i) => i.parsed!));
-      if (result.failedCount === 0) {
-        router.push('/journeys');
-        return;
-      }
-      const failedIndexes = new Set(result.failed.map((f) => f.index));
-      const savedIds = new Set(valid.filter((_, i) => !failedIndexes.has(i)).map((i) => i.id));
+
+      const dupByIndex = new Map(result.duplicates.map((d) => [d.index, d]));
+      const failedByIndex = new Map(result.failed.map((f) => [f.index, f]));
+      const savedIds = new Set(
+        valid.filter((_, i) => !dupByIndex.has(i) && !failedByIndex.has(i)).map((i) => i.id),
+      );
+
+      // Keep only the still-unsaved cards, flagged with why they were skipped.
       setItems((prev) =>
         prev
           .filter((i) => !savedIds.has(i.id))
           .map((i) => {
             const idx = valid.findIndex((v) => v.id === i.id);
-            if (idx < 0 || !failedIndexes.has(idx)) return i;
-            return { ...i, status: 'error' as Status, error: result.failed.find((f) => f.index === idx)?.message || 'Failed to save.' };
+            if (idx < 0) return i;
+            const dup = dupByIndex.get(idx);
+            if (dup) {
+              return { ...i, status: 'error' as Status, error: `Ticket ${dup.ticketNo} already exists — skipped.` };
+            }
+            const f = failedByIndex.get(idx);
+            if (f) return { ...i, status: 'error' as Status, error: f.message };
+            return i;
           }),
       );
-      setError(`Saved ${result.createdCount} of ${valid.length}. The rest failed — see the cards below.`);
+
+      if (result.duplicateCount) setDuplicates(result.duplicates);
+      if (result.failedCount) {
+        setError(`Saved ${result.createdCount} of ${valid.length}. ${result.failedCount} couldn't be saved — see the cards below.`);
+      }
+
+      if (result.duplicateCount === 0 && result.failedCount === 0) {
+        router.push('/journeys');
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to save journeys.');
     } finally {
@@ -464,6 +487,64 @@ export default function UploadPage() {
           </div>
         </div>
       )}
+
+      {/* Duplicate PNRs found while saving */}
+      <Modal
+        open={!!duplicates?.length}
+        onClose={() => setDuplicates(null)}
+        size="md"
+        header={
+          <div className="flex shrink-0 items-start gap-4 p-6 pr-14">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 text-[22px] text-white shadow-glow">
+              <IconAlert />
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold leading-tight text-ink-900">
+                {duplicates?.length === 1
+                  ? 'This ticket already exists'
+                  : `${duplicates?.length ?? 0} tickets already exist`}
+              </h3>
+              <p className="mt-1.5 text-sm text-ink-500">
+                These PNRs are already in your journeys, so they were skipped. Open one to preview the saved ticket.
+              </p>
+            </div>
+          </div>
+        }
+        footer={
+          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setDuplicates(null)}>Close</Button>
+            <Button onClick={() => router.push('/journeys')}>Go to journeys</Button>
+          </div>
+        }
+      >
+        <ul className="space-y-2 px-6 pb-5">
+          {duplicates?.map((d) => (
+            <li
+              key={d.index}
+              className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink-900">Ticket {d.ticketNo}</p>
+                <p className="truncate text-xs text-ink-500">
+                  {d.existing
+                    ? `${d.existing.trainName} · ${d.existing.fromStation} → ${d.existing.toStation}`
+                    : 'Already saved as a journey.'}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => d.existing && setPreview(d.existing)}
+                disabled={!d.existing}
+              >
+                <IconEye /> Preview
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </Modal>
+
+      <JourneyPreviewModal journey={preview} open={!!preview} onClose={() => setPreview(null)} />
     </div>
   );
 }

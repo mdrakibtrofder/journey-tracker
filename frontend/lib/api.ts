@@ -52,11 +52,19 @@ export interface BulkParseResult {
   error?: string;
 }
 
+export interface DuplicateEntry {
+  index: number;
+  ticketNo: string;
+  existing: Journey | null;
+}
+
 export interface BulkConfirmResult {
   created: Journey[];
   createdCount: number;
   failed: { index: number; message: string }[];
   failedCount: number;
+  duplicates: DuplicateEntry[];
+  duplicateCount: number;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

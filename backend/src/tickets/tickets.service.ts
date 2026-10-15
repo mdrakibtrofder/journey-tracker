@@ -55,15 +55,31 @@ export class TicketsService {
   async confirmMany(list: ParsedTicket[]) {
     const created: any[] = [];
     const failed: { index: number; message: string }[] = [];
+    const duplicates: { index: number; ticketNo: string; existing: any }[] = [];
 
     for (let i = 0; i < list.length; i++) {
       try {
         created.push(await this.confirm(list[i]));
       } catch (e: any) {
-        failed.push({ index: i, message: e?.message || 'Failed to save journey.' });
+        const ticketNo = list[i].ticketNo?.trim();
+        // A conflict means the PNR already exists — surface the stored journey
+        // so the UI can link straight to its preview.
+        if (e?.status === 409 && ticketNo) {
+          const existing = await this.journeys.findByTicketNo(ticketNo);
+          duplicates.push({ index: i, ticketNo, existing });
+        } else {
+          failed.push({ index: i, message: e?.message || 'Failed to save journey.' });
+        }
       }
     }
 
-    return { created, createdCount: created.length, failed, failedCount: failed.length };
+    return {
+      created,
+      createdCount: created.length,
+      failed,
+      failedCount: failed.length,
+      duplicates,
+      duplicateCount: duplicates.length,
+    };
   }
 }

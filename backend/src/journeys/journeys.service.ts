@@ -100,6 +100,10 @@ export class JourneysService {
     return journey;
   }
 
+  async findByTicketNo(ticketNo: string) {
+    return this.prisma.journey.findUnique({ where: { ticketNo } });
+  }
+
   async update(id: string, dto: UpdateJourneyDto) {
     const data: any = { ...dto };
     if (dto.departureTime) data.dayNight = computeDayNight(dto.departureTime);
