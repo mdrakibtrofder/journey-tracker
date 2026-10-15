@@ -38,6 +38,22 @@ export function mapChairType(raw?: string): ChairType {
   return CHAIR_MAP[key] || ChairType.OTHER;
 }
 
+/** String columns that the global search scans (enum columns can't use `contains`). */
+const SEARCHABLE_TEXT_FIELDS = [
+  'trainName',
+  'trainNumber',
+  'fromStation',
+  'toStation',
+  'passengerName',
+  'ticketNo',
+  'coachNo',
+  'seatNo',
+  'boardingPoint',
+  'notes',
+  'transactionId',
+  'departureTime',
+] as const;
+
 @Injectable()
 export class JourneysService {
   constructor(private prisma: PrismaService) {}
@@ -75,6 +91,7 @@ export class JourneysService {
     if (query.fromStation) where.fromStation = { contains: query.fromStation, mode: 'insensitive' };
     if (query.toStation) where.toStation = { contains: query.toStation, mode: 'insensitive' };
     if (query.trainName) where.trainName = { contains: query.trainName, mode: 'insensitive' };
+    if (query.departureTime) where.departureTime = { contains: query.departureTime, mode: 'insensitive' };
     if (query.chairType) where.chairType = query.chairType as ChairType;
     if (query.dayNight) where.dayNight = query.dayNight;
     if (query.startDate || query.endDate) {
@@ -82,16 +99,56 @@ export class JourneysService {
       if (query.startDate) where.journeyDate.gte = new Date(query.startDate);
       if (query.endDate) where.journeyDate.lte = new Date(query.endDate);
     }
+    // Global search: every word (or partial word) must appear in at least one
+    // field, so "dhaka ekota" and "dha eko" both match across columns.
     if (query.search) {
-      where.OR = [
-        { trainName: { contains: query.search, mode: 'insensitive' } },
-        { fromStation: { contains: query.search, mode: 'insensitive' } },
-        { toStation: { contains: query.search, mode: 'insensitive' } },
-        { passengerName: { contains: query.search, mode: 'insensitive' } },
-        { ticketNo: { contains: query.search, mode: 'insensitive' } },
-      ];
+      const terms = query.search.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      if (terms.length) {
+        where.AND = terms.map((term) => ({
+          OR: SEARCHABLE_TEXT_FIELDS.map((field) => ({
+            [field]: { contains: term, mode: 'insensitive' },
+          })),
+        }));
+      }
     }
     return this.prisma.journey.findMany({ where, orderBy: { journeyDate: 'desc' } });
+  }
+
+  /** Distinct existing values per column, used to build the search dropdowns. */
+  async facets() {
+    const rows = await this.prisma.journey.findMany({
+      select: {
+        trainName: true,
+        trainNumber: true,
+        fromStation: true,
+        toStation: true,
+        departureTime: true,
+        journeyDate: true,
+        chairType: true,
+        coachNo: true,
+        passengerName: true,
+        ticketNo: true,
+      },
+      orderBy: { journeyDate: 'desc' },
+    });
+
+    const uniq = (values: (string | null | undefined)[]) =>
+      Array.from(new Set(values.filter((v): v is string => Boolean(v && v.trim())))).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' }),
+      );
+
+    return {
+      trainNames: uniq(rows.map((r) => r.trainName)),
+      trainNumbers: uniq(rows.map((r) => r.trainNumber)),
+      fromStations: uniq(rows.map((r) => r.fromStation)),
+      toStations: uniq(rows.map((r) => r.toStation)),
+      departureTimes: uniq(rows.map((r) => r.departureTime)),
+      chairTypes: uniq(rows.map((r) => r.chairType)),
+      coachNos: uniq(rows.map((r) => r.coachNo)),
+      passengerNames: uniq(rows.map((r) => r.passengerName)),
+      ticketNos: uniq(rows.map((r) => r.ticketNo)),
+      journeyDates: Array.from(new Set(rows.map((r) => r.journeyDate.toISOString().slice(0, 10)))).sort().reverse(),
+    };
   }
 
   async findOne(id: string) {

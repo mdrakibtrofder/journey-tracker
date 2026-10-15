@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
-import { IconAlert, IconX } from './icons';
+import { IconAlert, IconChevronDown, IconX } from './icons';
 
 export function cn(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(' ');
@@ -195,6 +195,141 @@ export function Field({
     <div className={className}>
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+export interface ComboboxOption {
+  value: string;
+  /** Shown in the list; falls back to `value`. */
+  label?: string;
+  /** Optional section heading, so existing values can be listed column-wise. */
+  group?: string;
+}
+
+/**
+ * Input with a dropdown of allowed values. Nothing is invented — the list comes
+ * straight from the options the caller supplies (existing data only), and typing
+ * narrows it down so partially-remembered values are easy to pick.
+ */
+export function Combobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+  icon,
+  emptyOption,
+  className = '',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: ComboboxOption[];
+  placeholder?: string;
+  icon?: ReactNode;
+  /** When set, adds a row that clears the value (e.g. "All stations"). */
+  emptyOption?: string;
+  className?: string;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const q = value.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => (o.label || o.value).toLowerCase().includes(q))
+    : options;
+
+  // Keep the caller's order while collapsing into groups (column-wise listing).
+  const groups: { group: string; items: ComboboxOption[] }[] = [];
+  filtered.forEach((o) => {
+    const group = o.group || '';
+    const last = groups[groups.length - 1];
+    if (last && last.group === group) last.items.push(o);
+    else groups.push({ group, items: [o] });
+  });
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} className={cn('relative', className)}>
+      {icon && (
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400">
+          {icon}
+        </span>
+      )}
+      <input
+        className={cn(FIELD, 'pr-9', icon ? 'pl-10' : '')}
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={open}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        aria-label="Show options"
+        className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
+      >
+        <IconChevronDown className={cn('text-[16px] transition-transform duration-200', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1.5 max-h-64 w-full overflow-y-auto rounded-xl border border-ink-200 bg-white p-1.5 shadow-card-hover">
+          {emptyOption && (
+            <button
+              type="button"
+              onClick={() => pick('')}
+              className="flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm font-medium text-ink-500 transition hover:bg-ink-100"
+            >
+              {emptyOption}
+            </button>
+          )}
+          {groups.length === 0 ? (
+            <p className="px-2.5 py-2 text-sm text-ink-400">
+              {options.length === 0 ? 'No existing values yet' : 'No matches'}
+            </p>
+          ) : (
+            groups.map((g, gi) => (
+              <div key={g.group || gi}>
+                {g.group && (
+                  <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+                    {g.group}
+                  </p>
+                )}
+                {g.items.map((o) => (
+                  <button
+                    key={`${o.group || ''}:${o.value}`}
+                    type="button"
+                    onClick={() => pick(o.value)}
+                    className={cn(
+                      'flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm transition',
+                      o.value === value
+                        ? 'bg-brand-50 font-semibold text-brand-700'
+                        : 'text-ink-700 hover:bg-brand-50 hover:text-brand-700',
+                    )}
+                  >
+                    {o.label || o.value}
+                  </button>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

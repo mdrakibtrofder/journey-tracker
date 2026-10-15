@@ -2,43 +2,62 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, Journey } from '@/lib/api';
+import { api, Journey, JourneyFacets } from '@/lib/api';
 import {
-  formatDate, formatFare, formatDuration, chairClassLabel,
+  formatDate, formatDateTime, formatFare, chairClassLabel,
   dayNightTone, sourceTone, gradientFor,
 } from '@/lib/utils';
 import {
-  Card, Badge, Button, Input, Select, Label,
+  Card, Badge, Button, Select, Label, Combobox,
   PageHeader, Skeleton, EmptyState, Checkbox, ConfirmDialog, cn,
 } from '@/components/ui';
+import type { ComboboxOption } from '@/components/ui';
 import { JourneyPreviewModal } from '@/components/JourneyPreview';
 import {
   IconSearch, IconDownload, IconTrain, IconRoute, IconTrash, IconPencil,
   IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight, IconCheck, IconEye,
-  IconOpen, IconChevronDown,
+  IconOpen, IconChevronDown, IconCalendar, IconClock,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
 
 const EMPTY_FILTERS = {
   search: '', fromStation: '', toStation: '', trainName: '',
-  chairType: '', dayNight: '', startDate: '', endDate: '',
+  chairType: '', dayNight: '', departureTime: '', journeyDate: '',
 };
+
+const asOptions = (values: string[], group?: string): ComboboxOption[] =>
+  values.map((value) => ({ value, group }));
 
 export default function JourneysPage() {
   const [journeys, setJourneys] = useState<Journey[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [facets, setFacets] = useState<JourneyFacets | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [previewing, setPreviewing] = useState<Journey | null>(null);
 
+  const loadFacets = () => {
+    api.getFacets().then(setFacets).catch(() => {});
+  };
+
+  useEffect(loadFacets, []);
+
   const load = () => {
     setLoading(true);
     const params: Record<string, string> = {};
-    Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v; });
+    Object.entries(filters).forEach(([k, v]) => {
+      // journeyDate is a single dropdown; the API expects a start/end range.
+      if (!v || k === 'journeyDate') return;
+      params[k] = v;
+    });
+    if (filters.journeyDate) {
+      params.startDate = filters.journeyDate;
+      params.endDate = filters.journeyDate;
+    }
     api.getJourneys(params)
       .then((list) => {
         setJourneys(list);
@@ -52,6 +71,31 @@ export default function JourneysPage() {
 
   const activeCount = Object.values(filters).filter(Boolean).length;
   const advancedCount = Object.entries(filters).filter(([k, v]) => k !== 'search' && Boolean(v)).length;
+
+  // Global search suggestions: existing values straight from every column, so
+  // the dropdown never offers something that isn't in the data.
+  const searchOptions: ComboboxOption[] = facets
+    ? [
+        ...facets.trainNames.map((v) => ({ value: v, group: 'Train' })),
+        ...facets.trainNumbers.map((v) => ({ value: v, group: 'Train no.' })),
+        ...facets.fromStations.map((v) => ({ value: v, group: 'From station' })),
+        ...facets.toStations.map((v) => ({ value: v, group: 'To station' })),
+        ...facets.ticketNos.map((v) => ({ value: v, group: 'PNR / ticket' })),
+        ...facets.passengerNames.map((v) => ({ value: v, group: 'Passenger' })),
+        ...facets.coachNos.map((v) => ({ value: v, group: 'Coach' })),
+        ...facets.departureTimes.map((v) => ({ value: v, group: 'Journey time' })),
+      ]
+    : [];
+
+  const dateOptions: ComboboxOption[] = (facets?.journeyDates || []).map((v) => ({
+    value: v,
+    label: formatDate(v),
+  }));
+
+  const chairOptions: ComboboxOption[] = (facets?.chairTypes?.length ? facets.chairTypes : CHAIR_TYPES)
+    .map((v) => ({ value: v, label: chairClassLabel(v) }));
+
+  const timeOptions: ComboboxOption[] = asOptions(facets?.departureTimes || []);
 
   const allSelected = journeys.length > 0 && selected.length === journeys.length;
 
@@ -69,6 +113,7 @@ export default function JourneysPage() {
       setSelected((prev) => prev.filter((id) => !pendingIds.includes(id)));
       setPendingIds([]);
       load();
+      loadFacets();
     } finally {
       setDeleting(false);
     }
@@ -77,10 +122,10 @@ export default function JourneysPage() {
   const pendingJourneys = journeys.filter((j) => pendingIds.includes(j.id));
 
   const exportCsv = () => {
-    const headers = ['Train', 'From', 'To', 'Date', 'Departure', 'Arrival', 'Class', 'Coach', 'Fare', 'Passenger', 'Day/Night'];
+    const headers = ['Train', 'From', 'To', 'Date', 'Journey Time', 'Issued At', 'Class', 'Coach', 'Fare', 'Passenger', 'Day/Night'];
     const rows = journeys.map((j) => [
       j.trainName, j.fromStation, j.toStation, formatDate(j.journeyDate), j.departureTime,
-      j.arrivalTime || '', j.chairType, j.coachNo || '', j.fare, j.passengerName || '', j.dayNight,
+      formatDateTime(j.issuedAt), j.chairType, j.coachNo || '', j.fare, j.passengerName || '', j.dayNight,
     ]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -120,22 +165,14 @@ export default function JourneysPage() {
       <Card className="animate-fade-up">
         <div className="flex flex-wrap items-center gap-3 p-4">
           <div className="relative min-w-0 flex-1">
-            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-ink-400" />
-            <Input
-              className="pl-11 pr-10"
-              placeholder="Search train, station, PNR or passenger…"
+            <Combobox
               value={filters.search}
-              onChange={(e) => set('search', e.target.value)}
+              onChange={(v) => set('search', v)}
+              options={searchOptions}
+              icon={<IconSearch className="text-[18px]" />}
+              emptyOption="Clear search"
+              placeholder="Search everything — train, station, PNR, passenger, time…"
             />
-            {filters.search && (
-              <button
-                onClick={() => set('search', '')}
-                className="absolute right-3 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
-                aria-label="Clear search"
-              >
-                <IconX className="text-[14px]" />
-              </button>
-            )}
           </div>
 
           <Button
@@ -167,15 +204,70 @@ export default function JourneysPage() {
         {showFilters && (
           <div className="animate-fade-up border-t border-ink-100">
             <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-              <div><Label>From station</Label><Input placeholder="e.g. Dhaka" value={filters.fromStation} onChange={(e) => set('fromStation', e.target.value)} /></div>
-              <div><Label>To station</Label><Input placeholder="e.g. Natore" value={filters.toStation} onChange={(e) => set('toStation', e.target.value)} /></div>
-              <div><Label>Train name</Label><Input placeholder="e.g. Ekota" value={filters.trainName} onChange={(e) => set('trainName', e.target.value)} /></div>
+              <div>
+                <Label>From station</Label>
+                <Combobox
+                  value={filters.fromStation}
+                  onChange={(v) => set('fromStation', v)}
+                  options={asOptions(facets?.fromStations || [])}
+                  icon={<IconRoute className="text-[17px]" />}
+                  emptyOption="All stations"
+                  placeholder="Pick a station"
+                />
+              </div>
+              <div>
+                <Label>To station</Label>
+                <Combobox
+                  value={filters.toStation}
+                  onChange={(v) => set('toStation', v)}
+                  options={asOptions(facets?.toStations || [])}
+                  icon={<IconRoute className="text-[17px]" />}
+                  emptyOption="All stations"
+                  placeholder="Pick a station"
+                />
+              </div>
+              <div>
+                <Label>Train name</Label>
+                <Combobox
+                  value={filters.trainName}
+                  onChange={(v) => set('trainName', v)}
+                  options={asOptions(facets?.trainNames || [])}
+                  icon={<IconTrain className="text-[17px]" />}
+                  emptyOption="All trains"
+                  placeholder="Pick a train"
+                />
+              </div>
+              <div>
+                <Label>Journey date</Label>
+                <Combobox
+                  value={filters.journeyDate}
+                  onChange={(v) => set('journeyDate', v)}
+                  options={dateOptions}
+                  icon={<IconCalendar className="text-[17px]" />}
+                  emptyOption="All dates"
+                  placeholder="Pick a date"
+                />
+              </div>
+              <div>
+                <Label>Journey time</Label>
+                <Combobox
+                  value={filters.departureTime}
+                  onChange={(v) => set('departureTime', v)}
+                  options={timeOptions}
+                  icon={<IconClock className="text-[17px]" />}
+                  emptyOption="All times"
+                  placeholder="Pick a time"
+                />
+              </div>
               <div>
                 <Label>Chair class</Label>
-                <Select value={filters.chairType} onChange={(e) => set('chairType', e.target.value)}>
-                  <option value="">All classes</option>
-                  {CHAIR_TYPES.map((c) => <option key={c} value={c}>{chairClassLabel(c)}</option>)}
-                </Select>
+                <Combobox
+                  value={filters.chairType}
+                  onChange={(v) => set('chairType', v)}
+                  options={chairOptions}
+                  emptyOption="All classes"
+                  placeholder="Pick a class"
+                />
               </div>
               <div>
                 <Label>Time of day</Label>
@@ -185,8 +277,6 @@ export default function JourneysPage() {
                   <option value="NIGHT">Night</option>
                 </Select>
               </div>
-              <div><Label>From date</Label><Input type="date" value={filters.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
-              <div><Label>To date</Label><Input type="date" value={filters.endDate} onChange={(e) => set('endDate', e.target.value)} /></div>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-5 py-3">
               <p className="text-xs text-ink-400">
@@ -269,7 +359,7 @@ export default function JourneysPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <p className="font-medium text-ink-800">{formatDate(j.journeyDate)}</p>
-                        <p className="text-xs text-ink-400">{j.departureTime}{j.arrivalTime ? ` → ${j.arrivalTime}` : ''}{j.durationMins ? ` · ${formatDuration(j.durationMins)}` : ''}</p>
+                        <p className="text-xs text-ink-400">{j.departureTime}</p>
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex flex-wrap gap-1.5">

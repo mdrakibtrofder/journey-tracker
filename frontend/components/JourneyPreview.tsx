@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Journey } from '@/lib/api';
 import {
-  formatDate, formatFare, formatDuration, chairClassLabel,
+  formatDate, formatDateTime, formatFare, formatDuration, chairClassLabel,
 } from '@/lib/utils';
 import { Badge, Button, Modal, cn } from '@/components/ui';
 import {
@@ -15,9 +15,9 @@ import {
 export function JourneyDetailGrid({ journey, className = '' }: { journey: Journey; className?: string }) {
   const details = [
     { label: 'Journey date', value: formatDate(journey.journeyDate), icon: <IconCalendar /> },
-    { label: 'Departure', value: journey.departureTime, icon: <IconClock /> },
-    { label: 'Arrival', value: journey.arrivalTime || '—', icon: <IconClock /> },
+    { label: 'Journey time', value: journey.departureTime, icon: <IconClock /> },
     { label: 'Duration', value: formatDuration(journey.durationMins), icon: <IconClock /> },
+    { label: 'Issue date & time', value: formatDateTime(journey.issuedAt), icon: <IconCalendar /> },
     { label: 'Chair class', value: chairClassLabel(journey.chairType), icon: <IconTicket /> },
     { label: 'Coach / seat', value: journey.coachNo || '—', icon: <IconTicket /> },
     { label: 'Fare', value: formatFare(Number(journey.fare)), icon: <IconWallet /> },

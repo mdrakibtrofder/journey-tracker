@@ -47,6 +47,7 @@ export class QueryJourneyDto {
   @IsOptional() @IsString() fromStation?: string;
   @IsOptional() @IsString() toStation?: string;
   @IsOptional() @IsString() trainName?: string;
+  @IsOptional() @IsString() departureTime?: string;
   @IsOptional() @IsString() chairType?: string;
   @IsOptional() @IsString() dayNight?: string;
   @IsOptional() @IsDateString() startDate?: string;

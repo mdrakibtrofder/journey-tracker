@@ -52,6 +52,21 @@ export interface BulkParseResult {
   error?: string;
 }
 
+/** Distinct existing values per column — powers the search dropdowns. */
+export interface JourneyFacets {
+  trainNames: string[];
+  trainNumbers: string[];
+  fromStations: string[];
+  toStations: string[];
+  departureTimes: string[];
+  chairTypes: string[];
+  coachNos: string[];
+  passengerNames: string[];
+  ticketNos: string[];
+  /** YYYY-MM-DD */
+  journeyDates: string[];
+}
+
 export interface DuplicateEntry {
   index: number;
   ticketNo: string;
@@ -84,6 +99,7 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<Journey[]>(`/journeys${qs}`);
   },
+  getFacets: () => request<JourneyFacets>('/journeys/facets'),
   getJourney: (id: string) => request<Journey>(`/journeys/${id}`),
   createJourney: (data: Partial<Journey>) =>
     request<Journey>('/journeys', { method: 'POST', body: JSON.stringify(data) }),

@@ -15,7 +15,7 @@ export default function NewJourneyPage() {
   const router = useRouter();
   const [form, setForm] = useState({
     trainName: '', trainNumber: '', fromStation: '', toStation: '',
-    journeyDate: '', departureTime: '', arrivalTime: '', chairType: 'SHOVAN_CHAIR',
+    journeyDate: '', departureTime: '', issuedAt: '', chairType: 'SHOVAN_CHAIR',
     coachNo: '', fare: 0, passengerName: '', ticketNo: '', notes: '',
   });
   const [error, setError] = useState('');
@@ -89,16 +89,16 @@ export default function NewJourneyPage() {
               </Select>
             </Field>
 
-            <Field label="Departure time *">
+            <Field label="Journey time *">
               <div className="relative">
                 <IconClock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
                 <Input required className="pl-10" type="time" value={form.departureTime} onChange={(e) => set('departureTime', e.target.value)} />
               </div>
             </Field>
-            <Field label="Arrival time">
+            <Field label="Issue date & time">
               <div className="relative">
-                <IconClock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" type="time" value={form.arrivalTime} onChange={(e) => set('arrivalTime', e.target.value)} />
+                <IconCalendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                <Input className="pl-10" type="datetime-local" value={form.issuedAt} onChange={(e) => set('issuedAt', e.target.value)} />
               </div>
             </Field>
           </div>

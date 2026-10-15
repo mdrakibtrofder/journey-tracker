@@ -16,6 +16,12 @@ export class JourneysController {
     return this.journeysService.findAll(query);
   }
 
+  // Must be declared before ':id' so it isn't captured as an id.
+  @Get('facets')
+  facets() {
+    return this.journeysService.facets();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.journeysService.findOne(id);

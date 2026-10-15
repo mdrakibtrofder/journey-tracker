@@ -2,6 +2,32 @@ export function formatDate(d: string): string {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function parseDateLike(d?: string | null): Date | null {
+  if (!d) return null;
+  // The PDF parser emits "YYYY-MM-DD HH:mm"; normalise the separator so every
+  // browser parses it.
+  const dt = new Date(d.replace(' ', 'T'));
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+/** "10 Oct 2026, 14:57" — for issue date & time. */
+export function formatDateTime(d?: string | null): string {
+  const dt = parseDateLike(d);
+  if (!dt) return '—';
+  return dt.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+/** Value for a <input type="datetime-local"> (YYYY-MM-DDTHH:mm). */
+export function toDateTimeLocal(d?: string | null): string {
+  const dt = parseDateLike(d);
+  if (!dt) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
 export function formatFare(n: number): string {
   return `৳ ${Number(n || 0).toLocaleString('en-IN')}`;
 }

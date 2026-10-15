@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, Journey } from '@/lib/api';
-import { chairClassLabel } from '@/lib/utils';
+import { chairClassLabel, toDateTimeLocal } from '@/lib/utils';
 import {
   Card, CardHeader, Button, Input, Select, Field, Badge, PageHeader, Skeleton, ConfirmDialog,
 } from '@/components/ui';
@@ -173,8 +173,8 @@ export default function JourneyDetailPage() {
             <Field label="From station"><Input value={form.fromStation || ''} onChange={(e) => set('fromStation', e.target.value)} /></Field>
             <Field label="To station"><Input value={form.toStation || ''} onChange={(e) => set('toStation', e.target.value)} /></Field>
             <Field label="Journey date"><Input type="date" value={(form.journeyDate || '').slice(0, 10)} onChange={(e) => set('journeyDate', e.target.value)} /></Field>
-            <Field label="Departure"><Input type="time" value={form.departureTime || ''} onChange={(e) => set('departureTime', e.target.value)} /></Field>
-            <Field label="Arrival"><Input type="time" value={form.arrivalTime || ''} onChange={(e) => set('arrivalTime', e.target.value)} /></Field>
+            <Field label="Journey time"><Input type="time" value={form.departureTime || ''} onChange={(e) => set('departureTime', e.target.value)} /></Field>
+            <Field label="Issue date & time"><Input type="datetime-local" value={toDateTimeLocal(form.issuedAt)} onChange={(e) => set('issuedAt', e.target.value)} /></Field>
             <Field label="Coach / seat"><Input value={form.coachNo || ''} onChange={(e) => set('coachNo', e.target.value)} /></Field>
             <Field label="Fare (BDT)"><Input type="number" value={form.fare ?? 0} onChange={(e) => set('fare', parseFloat(e.target.value) || 0)} /></Field>
             <Field label="Passenger"><Input value={form.passengerName || ''} onChange={(e) => set('passengerName', e.target.value)} /></Field>

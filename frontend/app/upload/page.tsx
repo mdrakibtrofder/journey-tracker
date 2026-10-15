@@ -7,6 +7,7 @@ import {
   Card, Button, Input, Select, Label, PageHeader, Badge, Modal, cn,
 } from '@/components/ui';
 import { JourneyPreviewModal } from '@/components/JourneyPreview';
+import { toDateTimeLocal } from '@/lib/utils';
 import {
   IconUpload, IconFile, IconCheck, IconX, IconSparkles, IconAlert,
   IconTrain, IconRoute, IconCalendar, IconWallet, IconTicket, IconSearch, IconTrash,
@@ -43,7 +44,7 @@ function missingFields(p?: ParsedTicket): string[] {
   if (!p?.fromStation) missing.push('from station');
   if (!p?.toStation) missing.push('to station');
   if (!p?.journeyDate) missing.push('journey date');
-  if (!p?.departureTime) missing.push('departure time');
+  if (!p?.departureTime) missing.push('journey time');
   return missing;
 }
 
@@ -432,8 +433,8 @@ export default function UploadPage() {
                         {CHAIR_TYPES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
                       </Select>
                     </div>
-                    <div><Label>Departure time *</Label><Input type="time" value={item.parsed?.departureTime || ''} onChange={(e) => setField(item.id, 'departureTime', e.target.value)} /></div>
-                    <div><Label>Arrival time</Label><Input type="time" value={item.parsed?.arrivalTime || ''} onChange={(e) => setField(item.id, 'arrivalTime', e.target.value)} /></div>
+                    <div><Label>Journey time *</Label><Input type="time" value={item.parsed?.departureTime || ''} onChange={(e) => setField(item.id, 'departureTime', e.target.value)} /></div>
+                    <div><Label>Issue date & time</Label><Input type="datetime-local" value={toDateTimeLocal(item.parsed?.issuedAt)} onChange={(e) => setField(item.id, 'issuedAt', e.target.value)} /></div>
 
                     <div><Label>Coach / seat</Label><Input value={item.parsed?.coachNo || ''} onChange={(e) => setField(item.id, 'coachNo', e.target.value)} placeholder="JA-52" /></div>
                     <div>
