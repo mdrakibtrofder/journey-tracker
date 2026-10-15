@@ -59,7 +59,8 @@ export default function UploadPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [duplicates, setDuplicates] = useState<DuplicateEntry[] | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateEntry[]>([]);
+  const [saveFailures, setSaveFailures] = useState<{ index: number; message: string }[]>([]);
   const [preview, setPreview] = useState<Journey | null>(null);
 
   const valid = items.filter((i) => i.status === 'ready' && missingFields(i.parsed).length === 0);
@@ -169,8 +170,12 @@ export default function UploadPage() {
     setItems([]);
     setError('');
     setNotice('');
-    setDuplicates(null);
-    setPreview(null);
+    closeSaveModal();
+  };
+
+  const closeSaveModal = () => {
+    setDuplicates([]);
+    setSaveFailures([]);
   };
 
   const saveAll = async () => {
@@ -178,12 +183,14 @@ export default function UploadPage() {
     setSaving(true);
     setError('');
     setNotice('');
-    setDuplicates(null);
+    closeSaveModal();
     try {
       const result = await api.confirmTickets(valid.map((i) => i.parsed!));
+      const dupes = result.duplicates ?? [];
+      const fails = result.failed ?? [];
 
-      const dupByIndex = new Map(result.duplicates.map((d) => [d.index, d]));
-      const failedByIndex = new Map(result.failed.map((f) => [f.index, f]));
+      const dupByIndex = new Map(dupes.map((d) => [d.index, d]));
+      const failedByIndex = new Map(fails.map((f) => [f.index, f]));
       const savedIds = new Set(
         valid.filter((_, i) => !dupByIndex.has(i) && !failedByIndex.has(i)).map((i) => i.id),
       );
@@ -205,14 +212,14 @@ export default function UploadPage() {
           }),
       );
 
-      if (result.duplicateCount) setDuplicates(result.duplicates);
-      if (result.failedCount) {
-        setError(`Saved ${result.createdCount} of ${valid.length}. ${result.failedCount} couldn't be saved — see the cards below.`);
-      }
-
-      if (result.duplicateCount === 0 && result.failedCount === 0) {
+      // Only leave the page when every ready ticket was actually created.
+      // Anything else opens the result modal so nothing fails silently.
+      if (result.createdCount === valid.length) {
         router.push('/journeys');
+        return;
       }
+      setDuplicates(dupes);
+      setSaveFailures(fails);
     } catch (e: any) {
       setError(e?.message || 'Failed to save journeys.');
     } finally {
@@ -488,10 +495,10 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Duplicate PNRs found while saving */}
+      {/* Save outcome — duplicates and any failures, always surfaced here */}
       <Modal
-        open={!!duplicates?.length}
-        onClose={() => setDuplicates(null)}
+        open={duplicates.length > 0 || saveFailures.length > 0}
+        onClose={closeSaveModal}
         size="md"
         header={
           <div className="flex shrink-0 items-start gap-4 p-6 pr-14">
@@ -500,48 +507,82 @@ export default function UploadPage() {
             </span>
             <div className="min-w-0">
               <h3 className="text-lg font-bold leading-tight text-ink-900">
-                {duplicates?.length === 1
-                  ? 'This ticket already exists'
-                  : `${duplicates?.length ?? 0} tickets already exist`}
+                {duplicates.length > 0 && saveFailures.length > 0
+                  ? `${duplicates.length} already saved · ${saveFailures.length} failed`
+                  : duplicates.length > 0
+                    ? duplicates.length === 1
+                      ? 'This ticket already exists'
+                      : `${duplicates.length} tickets already exist`
+                    : `${saveFailures.length} journey${saveFailures.length === 1 ? '' : 's'} couldn't be saved`}
               </h3>
               <p className="mt-1.5 text-sm text-ink-500">
-                These PNRs are already in your journeys, so they were skipped. Open one to preview the saved ticket.
+                {duplicates.length > 0
+                  ? 'Tickets already in your list were skipped — open one to preview the saved journey.'
+                  : 'Something went wrong while saving these tickets.'}
               </p>
             </div>
           </div>
         }
         footer={
           <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={() => setDuplicates(null)}>Close</Button>
+            <Button variant="secondary" onClick={closeSaveModal}>Close</Button>
             <Button onClick={() => router.push('/journeys')}>Go to journeys</Button>
           </div>
         }
       >
-        <ul className="space-y-2 px-6 pb-5">
-          {duplicates?.map((d) => (
-            <li
-              key={d.index}
-              className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-4 py-3"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink-900">Ticket {d.ticketNo}</p>
-                <p className="truncate text-xs text-ink-500">
-                  {d.existing
-                    ? `${d.existing.trainName} · ${d.existing.fromStation} → ${d.existing.toStation}`
-                    : 'Already saved as a journey.'}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => d.existing && setPreview(d.existing)}
-                disabled={!d.existing}
-              >
-                <IconEye /> Preview
-              </Button>
-            </li>
-          ))}
-        </ul>
+        {duplicates.length > 0 && (
+          <>
+            <p className="px-6 pb-2 pt-5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+              Already saved
+            </p>
+            <ul className="space-y-2 px-6 pb-5">
+              {duplicates.map((d) => (
+                <li
+                  key={d.index}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink-900">Ticket {d.ticketNo}</p>
+                    <p className="truncate text-xs text-ink-500">
+                      {d.existing
+                        ? `${d.existing.trainName} · ${d.existing.fromStation} → ${d.existing.toStation}`
+                        : 'Already saved as a journey.'}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => d.existing && setPreview(d.existing)}
+                    disabled={!d.existing}
+                  >
+                    <IconEye /> Preview
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {saveFailures.length > 0 && (
+          <>
+            <p className="px-6 pb-2 pt-5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+              Couldn't be saved
+            </p>
+            <ul className="space-y-2 px-6 pb-5">
+              {saveFailures.map((f) => (
+                <li key={f.index} className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {f.message}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {duplicates.length === 0 && saveFailures.length === 0 && (
+          <p className="px-6 py-5 text-sm text-ink-500">
+            Some journeys weren't saved. Please try again.
+          </p>
+        )}
       </Modal>
 
       <JourneyPreviewModal journey={preview} open={!!preview} onClose={() => setPreview(null)} />
