@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChairType {
+  AC_B
+  AC_S
+  SNIGDHA
+  F_BERTH
+  F_SEAT
+  SHOVAN
+  SHOVAN_CHAIR
+  LUXURY
+  OTHER
+}
+
+enum Source {
+  PDF
+  MANUAL
+}
+
+model Journey {
+  id             String     @id @default(uuid())
+  ticketNo       String?    @unique
+  trainName      String
+  trainNumber    String?
+  fromStation    String
+  toStation      String
+  journeyDate    DateTime
+  departureTime  String
+  arrivalTime    String?
+  durationMins   Int?
+  dayNight       String     @default("DAY")
+  chairType      ChairType  @default(OTHER)
+  coachNo        String?
+  seatNo         String?
+  fare           Decimal    @default(0)
+  passengerName  String?
+  boardingPoint  String?
+  issuedAt       DateTime?
+  transactionId  String?
+  source         Source     @default(MANUAL)
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([journeyDate])
+  @@index([fromStation])
+  @@index([toStation])
+  @@index([trainName])
+  @@index([chairType])
+  @@index([dayNight])
+}
