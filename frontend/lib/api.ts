@@ -92,12 +92,23 @@ export const api = {
       r.ok ? r.json() : r.json().then((e) => { throw new Error(e.message); })
     );
   },
-  uploadTickets: (files: File[]) => {
+  uploadTickets: async (files: File[]): Promise<BulkParseResult[]> => {
     const fd = new FormData();
     files.forEach((file) => fd.append('files', file));
-    return fetch(`${API}/tickets/upload-many`, { method: 'POST', body: fd }).then((r) =>
-      r.ok ? r.json() as Promise<BulkParseResult[]> : r.json().then((e) => { throw new Error(e.message); })
-    );
+    const res = await fetch(`${API}/tickets/upload-many`, { method: 'POST', body: fd });
+    // Read as text first: a proxy/over-limit rejection is often HTML, not JSON,
+    // and res.json() would then surface a useless parse error.
+    const raw = await res.text();
+    let data: any = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+    if (!res.ok) {
+      const message = Array.isArray(data?.message) ? data.message.join(', ') : data?.message;
+      throw new Error(
+        message ||
+        `Upload failed (HTTP ${res.status}${res.status === 413 ? ' — the request was too large' : ''}).`,
+      );
+    }
+    return (Array.isArray(data) ? data : []) as BulkParseResult[];
   },
   confirmTicket: (parsed: ParsedTicket) =>
     request<Journey>('/tickets/confirm', { method: 'POST', body: JSON.stringify({ parsed }) }),

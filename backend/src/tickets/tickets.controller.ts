@@ -8,7 +8,7 @@ import { extname } from 'path';
 import { TicketsService } from './tickets.service';
 import { ParsedTicket } from './ticket-parser.service';
 
-const MAX_FILES = 30;
+const MAX_FILES = 100;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const pdfStorage = diskStorage({
@@ -44,9 +44,14 @@ export class TicketsController {
   }
 
   @Post('upload-many')
-  @UseInterceptors(FilesInterceptor('files', MAX_FILES, uploadOptions))
+  // One extra slot past the limit so an oversized batch gets a clear message
+  // instead of multer aborting the request with a bare LIMIT_FILE_COUNT.
+  @UseInterceptors(FilesInterceptor('files', MAX_FILES + 1, uploadOptions))
   async uploadMany(@UploadedFiles() files: Express.Multer.File[]) {
     if (!files?.length) throw new BadRequestException('No files uploaded');
+    if (files.length > MAX_FILES) {
+      throw new BadRequestException(`Too many files — please upload up to ${MAX_FILES} PDFs per request.`);
+    }
     return this.ticketsService.parseMany(files);
   }
 

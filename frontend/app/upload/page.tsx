@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, ParsedTicket } from '@/lib/api';
+import { api, ParsedTicket, BulkParseResult } from '@/lib/api';
 import {
   Card, Button, Input, Select, Label, PageHeader, Badge, cn,
 } from '@/components/ui';
@@ -27,6 +27,13 @@ interface QueueItem {
 let seq = 0;
 const nextId = () => `t${Date.now()}-${seq++}`;
 
+/**
+ * Files are parsed in small batches rather than one giant request: a single
+ * 50+ file upload is slow, gives no progress, and one hiccup loses the whole
+ * batch. Batching keeps each request small and lets the rest succeed.
+ */
+const BATCH_SIZE = 10;
+
 /** Required fields for a journey to be savable. */
 function missingFields(p?: ParsedTicket): string[] {
   const missing: string[] = [];
@@ -46,6 +53,7 @@ export default function UploadPage() {
   const [dragging, setDragging] = useState(false);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -57,48 +65,79 @@ export default function UploadPage() {
     setError('');
     setNotice('');
     if (!files.length) return;
+    if (parsing) {
+      setNotice('Still reading the previous files — add more once that finishes.');
+      return;
+    }
 
     const pdfs = files.filter(isPdf);
     const rejected = files.length - pdfs.length;
-    if (rejected > 0) setNotice(`${rejected} non-PDF file${rejected === 1 ? ' was' : 's were'} skipped.`);
+    const notesByReason: string[] = [];
+    if (rejected > 0) notesByReason.push(`${rejected} non-PDF file${rejected === 1 ? ' was' : 's were'} skipped.`);
     if (!pdfs.length) {
       setError('Please choose PDF files only.');
       return;
     }
 
+    // A 50-ticket batch would mount hundreds of inputs at once; keep the queue
+    // compact and let each card be opened on demand instead.
+    const autoExpand = pdfs.length <= 3;
     const queued: QueueItem[] = pdfs.map((f) => ({
       id: nextId(),
       fileName: f.name,
       status: 'parsing',
-      expanded: true,
+      expanded: autoExpand,
     }));
     setItems((prev) => [...prev, ...queued]);
     setParsing(true);
+    setProgress({ done: 0, total: pdfs.length });
+
+    const batchErrors: string[] = [];
 
     try {
-      const results = await api.uploadTickets(pdfs);
-      const byIndex = new Map(pdfs.map((f, i) => [i, { file: f, res: results[i] }]));
-      setItems((prev) =>
-        prev.map((item) => {
-          const idx = queued.findIndex((q) => q.id === item.id);
-          if (idx < 0) return item;
-          const entry = byIndex.get(idx);
-          if (!entry) return item;
-          if (entry.res?.error || !entry.res?.parsed) {
-            return { ...item, status: 'error' as Status, error: entry.res?.error || 'Could not read this ticket.' };
-          }
-          return { ...item, status: 'ready' as Status, parsed: entry.res.parsed };
-        }),
-      );
-    } catch (e: any) {
-      const message = e?.message || 'Failed to parse tickets.';
-      setItems((prev) =>
-        prev.map((item) => (queued.some((q) => q.id === item.id) ? { ...item, status: 'error' as Status, error: message } : item)),
-      );
-      setError(message);
+      for (let start = 0; start < pdfs.length; start += BATCH_SIZE) {
+        const batch = pdfs.slice(start, start + BATCH_SIZE);
+        const batchQueued = queued.slice(start, start + batch.length);
+
+        let results: BulkParseResult[] = [];
+        try {
+          results = await api.uploadTickets(batch);
+        } catch (e: any) {
+          // One failed batch must not discard the others.
+          const message = e?.message || 'Upload failed.';
+          if (!batchErrors.includes(message)) batchErrors.push(message);
+          const failedIds = new Set(batchQueued.map((q) => q.id));
+          setItems((prev) =>
+            prev.map((i) => (failedIds.has(i.id) ? { ...i, status: 'error' as Status, error: message } : i)),
+          );
+          setProgress((p) => (p ? { ...p, done: p.done + batch.length } : p));
+          continue;
+        }
+
+        setItems((prev) =>
+          prev.map((item) => {
+            const idx = batchQueued.findIndex((q) => q.id === item.id);
+            if (idx < 0) return item;
+            const res = results[idx];
+            if (res?.error || !res?.parsed) {
+              return { ...item, status: 'error' as Status, error: res?.error || 'Could not read this ticket.' };
+            }
+            return { ...item, status: 'ready' as Status, parsed: res.parsed };
+          }),
+        );
+        setProgress((p) => (p ? { ...p, done: p.done + batch.length } : p));
+      }
     } finally {
       setParsing(false);
+      setProgress(null);
     }
+
+    if (batchErrors.length) {
+      setError(
+        `${batchErrors.length === 1 ? 'A batch failed' : `${batchErrors.length} batches failed`} — ${batchErrors.join(' · ')}`,
+      );
+    }
+    if (notesByReason.length) setNotice(notesByReason.join(' '));
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -201,13 +240,23 @@ export default function UploadPage() {
           {parsing ? 'Reading your tickets…' : dragging ? 'Drop them here' : hasItems ? 'Add more ticket PDFs' : 'Drag & drop your ticket PDFs'}
         </h3>
         <p className="relative mt-1.5 text-sm text-ink-500">
-          {parsing ? 'Extracting journey details' : 'Select several PDFs at once — or click anywhere to browse'}
+          {parsing
+            ? `Extracting journey details${progress ? ` · ${progress.done} of ${progress.total}` : ''}`
+            : 'Select several PDFs at once — or click anywhere to browse'}
         </p>
+        {parsing && progress && (
+          <div className="relative mx-auto mt-4 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-ink-100">
+            <div
+              className="h-full rounded-full bg-gradient-brand transition-all duration-300"
+              style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+            />
+          </div>
+        )}
         {!hasItems && (
           <div className="relative mt-5 flex flex-wrap items-center justify-center gap-2">
             <Badge tone="brand"><IconFile className="text-[12px]" /> PDF only</Badge>
             <Badge tone="slate">Up to 10 MB each</Badge>
-            <Badge tone="emerald"><IconSparkles className="text-[12px]" /> Bulk import, 10+ fields each</Badge>
+            <Badge tone="emerald"><IconSparkles className="text-[12px]" /> 50+ tickets at once</Badge>
           </div>
         )}
         <input
@@ -238,7 +287,7 @@ export default function UploadPage() {
       {!hasItems && !parsing && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
-            { icon: <IconUpload />, title: 'Drop many PDFs', desc: 'Drag in a whole folder of tickets in one go.' },
+            { icon: <IconUpload />, title: 'Drop many PDFs', desc: 'Drag in 50+ tickets in one go — they upload in small batches.' },
             { icon: <IconSearch />, title: 'We extract the data', desc: 'Train, route, class, coach, fare, passenger and PNR.' },
             { icon: <IconCheck />, title: 'Review & save all', desc: 'Fix anything inline, then save every journey at once.' },
           ].map((s) => (
