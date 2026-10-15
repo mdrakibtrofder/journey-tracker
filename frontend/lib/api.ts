@@ -45,6 +45,20 @@ export interface ParsedTicket {
   transactionId?: string;
 }
 
+export interface BulkParseResult {
+  fileName: string;
+  filePath: string;
+  parsed?: ParsedTicket;
+  error?: string;
+}
+
+export interface BulkConfirmResult {
+  created: Journey[];
+  createdCount: number;
+  failed: { index: number; message: string }[];
+  failedCount: number;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
@@ -69,6 +83,8 @@ export const api = {
     request<Journey>(`/journeys/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteJourney: (id: string) =>
     request<Journey>(`/journeys/${id}`, { method: 'DELETE' }),
+  deleteJourneys: (ids: string[]) =>
+    request<{ deleted: number }>('/journeys', { method: 'DELETE', body: JSON.stringify({ ids }) }),
   uploadTicket: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -76,8 +92,17 @@ export const api = {
       r.ok ? r.json() : r.json().then((e) => { throw new Error(e.message); })
     );
   },
+  uploadTickets: (files: File[]) => {
+    const fd = new FormData();
+    files.forEach((file) => fd.append('files', file));
+    return fetch(`${API}/tickets/upload-many`, { method: 'POST', body: fd }).then((r) =>
+      r.ok ? r.json() as Promise<BulkParseResult[]> : r.json().then((e) => { throw new Error(e.message); })
+    );
+  },
   confirmTicket: (parsed: ParsedTicket) =>
     request<Journey>('/tickets/confirm', { method: 'POST', body: JSON.stringify({ parsed }) }),
+  confirmTickets: (list: ParsedTicket[]) =>
+    request<BulkConfirmResult>('/tickets/confirm-many', { method: 'POST', body: JSON.stringify({ parsed: list }) }),
   analytics: {
     summary: () => request('/analytics/summary'),
     byStation: () => request('/analytics/by-station'),

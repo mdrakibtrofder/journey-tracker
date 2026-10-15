@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, BadRequestException } from '@nestjs/common';
 import { JourneysService } from './journeys.service';
 import { CreateJourneyDto, UpdateJourneyDto, QueryJourneyDto } from './dto/journey.dto';
 
@@ -24,6 +24,13 @@ export class JourneysController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateJourneyDto) {
     return this.journeysService.update(id, dto);
+  }
+
+  @Delete()
+  removeMany(@Body() body: { ids?: string[] }) {
+    const ids = Array.isArray(body?.ids) ? body.ids.filter(Boolean) : [];
+    if (!ids.length) throw new BadRequestException('No journey ids provided');
+    return this.journeysService.removeMany(ids);
   }
 
   @Delete(':id')

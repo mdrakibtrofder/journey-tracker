@@ -105,4 +105,9 @@ export class JourneysService {
     await this.findOne(id);
     return this.prisma.journey.delete({ where: { id } });
   }
+
+  async removeMany(ids: string[]) {
+    const res = await this.prisma.journey.deleteMany({ where: { id: { in: ids } } });
+    return { deleted: res.count };
+  }
 }

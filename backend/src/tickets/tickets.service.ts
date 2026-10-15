@@ -13,6 +13,23 @@ export class TicketsService {
     return this.parser.parsePdf(filePath);
   }
 
+  async parseMany(files: Express.Multer.File[]) {
+    return Promise.all(
+      files.map(async (file) => {
+        try {
+          const parsed = await this.parser.parsePdf(file.path);
+          return { fileName: file.originalname, filePath: file.path, parsed };
+        } catch (e: any) {
+          return {
+            fileName: file.originalname,
+            filePath: file.path,
+            error: e?.message || 'Failed to parse ticket.',
+          };
+        }
+      }),
+    );
+  }
+
   async confirm(parsed: ParsedTicket) {
     return this.journeys.create({
       ticketNo: parsed.ticketNo,
@@ -33,5 +50,20 @@ export class TicketsService {
       transactionId: parsed.transactionId,
       source: 'PDF' as any,
     });
+  }
+
+  async confirmMany(list: ParsedTicket[]) {
+    const created: any[] = [];
+    const failed: { index: number; message: string }[] = [];
+
+    for (let i = 0; i < list.length; i++) {
+      try {
+        created.push(await this.confirm(list[i]));
+      } catch (e: any) {
+        failed.push({ index: i, message: e?.message || 'Failed to save journey.' });
+      }
+    }
+
+    return { created, createdCount: created.length, failed, failedCount: failed.length };
   }
 }

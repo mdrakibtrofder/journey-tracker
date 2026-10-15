@@ -192,3 +192,11 @@ export const IconSpark = (p: IconProps) => (
     <path d="M12 4v4M12 16v4M4 12h4M16 12h4M6.5 6.5l2.5 2.5M15 15l2.5 2.5M17.5 6.5 15 9M9 15l-2.5 2.5" />
   </Base>
 );
+
+export const IconAlert = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M10.3 3.9 2.5 17.2A2 2 0 0 0 4.2 20.2h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    <path d="M12 9.5v4.2M12 17.1h.01" />
+  </Base>
+);
+

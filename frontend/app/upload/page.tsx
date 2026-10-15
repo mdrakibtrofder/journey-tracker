@@ -4,39 +4,98 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, ParsedTicket } from '@/lib/api';
 import {
-  Card, CardHeader, Button, Input, Select, Label, PageHeader, Badge, cn,
+  Card, Button, Input, Select, Label, PageHeader, Badge, cn,
 } from '@/components/ui';
 import {
-  IconUpload, IconFile, IconCheck, IconX, IconSparkles,
-  IconTrain, IconRoute, IconCalendar, IconWallet, IconTicket, IconSearch,
+  IconUpload, IconFile, IconCheck, IconX, IconSparkles, IconAlert,
+  IconTrain, IconRoute, IconCalendar, IconWallet, IconTicket, IconSearch, IconTrash,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
+
+type Status = 'parsing' | 'ready' | 'error';
+
+interface QueueItem {
+  id: string;
+  fileName: string;
+  status: Status;
+  error?: string;
+  parsed?: ParsedTicket;
+  expanded: boolean;
+}
+
+let seq = 0;
+const nextId = () => `t${Date.now()}-${seq++}`;
+
+/** Required fields for a journey to be savable. */
+function missingFields(p?: ParsedTicket): string[] {
+  const missing: string[] = [];
+  if (!p?.trainName) missing.push('train name');
+  if (!p?.fromStation) missing.push('from station');
+  if (!p?.toStation) missing.push('to station');
+  if (!p?.journeyDate) missing.push('journey date');
+  if (!p?.departureTime) missing.push('departure time');
+  return missing;
+}
+
+const isPdf = (f: File) => f.type.includes('pdf') || /\.pdf$/i.test(f.name);
 
 export default function UploadPage() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [items, setItems] = useState<QueueItem[]>([]);
   const [parsing, setParsing] = useState(false);
-  const [fileName, setFileName] = useState('');
-  const [parsed, setParsed] = useState<ParsedTicket | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  const handleFile = async (file: File) => {
+  const valid = items.filter((i) => i.status === 'ready' && missingFields(i.parsed).length === 0);
+  const invalid = items.filter((i) => i.status === 'error' || (i.status === 'ready' && missingFields(i.parsed).length > 0));
+
+  const addFiles = async (files: File[]) => {
     setError('');
-    setParsed(null);
-    if (!file.type.includes('pdf')) {
-      setError('Please upload a PDF file.');
+    setNotice('');
+    if (!files.length) return;
+
+    const pdfs = files.filter(isPdf);
+    const rejected = files.length - pdfs.length;
+    if (rejected > 0) setNotice(`${rejected} non-PDF file${rejected === 1 ? ' was' : 's were'} skipped.`);
+    if (!pdfs.length) {
+      setError('Please choose PDF files only.');
       return;
     }
-    setFileName(file.name);
+
+    const queued: QueueItem[] = pdfs.map((f) => ({
+      id: nextId(),
+      fileName: f.name,
+      status: 'parsing',
+      expanded: true,
+    }));
+    setItems((prev) => [...prev, ...queued]);
     setParsing(true);
+
     try {
-      const res = await api.uploadTicket(file);
-      setParsed(res.parsed);
+      const results = await api.uploadTickets(pdfs);
+      const byIndex = new Map(pdfs.map((f, i) => [i, { file: f, res: results[i] }]));
+      setItems((prev) =>
+        prev.map((item) => {
+          const idx = queued.findIndex((q) => q.id === item.id);
+          if (idx < 0) return item;
+          const entry = byIndex.get(idx);
+          if (!entry) return item;
+          if (entry.res?.error || !entry.res?.parsed) {
+            return { ...item, status: 'error' as Status, error: entry.res?.error || 'Could not read this ticket.' };
+          }
+          return { ...item, status: 'ready' as Status, parsed: entry.res.parsed };
+        }),
+      );
     } catch (e: any) {
-      setError(e.message || 'Failed to parse ticket.');
+      const message = e?.message || 'Failed to parse tickets.';
+      setItems((prev) =>
+        prev.map((item) => (queued.some((q) => q.id === item.id) ? { ...item, status: 'error' as Status, error: message } : item)),
+      );
+      setError(message);
     } finally {
       setParsing(false);
     }
@@ -45,76 +104,126 @@ export default function UploadPage() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    addFiles(Array.from(e.dataTransfer.files));
   };
 
-  const set = (k: keyof ParsedTicket, v: any) => setParsed({ ...parsed!, [k]: v });
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(e.target.files || []));
+    e.target.value = '';
+  };
 
-  const confirm = async () => {
-    setConfirming(true);
+  const setField = (id: string, key: keyof ParsedTicket, value: any) =>
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, parsed: { ...i.parsed!, [key]: value } } : i)),
+    );
+
+  const toggleItem = (id: string) =>
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, expanded: !i.expanded } : i)));
+
+  const removeItem = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
+
+  const reset = () => {
+    setItems([]);
     setError('');
+    setNotice('');
+  };
+
+  const saveAll = async () => {
+    if (!valid.length) return;
+    setSaving(true);
+    setError('');
+    setNotice('');
     try {
-      const j = await api.confirmTicket(parsed!);
-      router.push(`/journeys/${j.id}`);
+      const result = await api.confirmTickets(valid.map((i) => i.parsed!));
+      if (result.failedCount === 0) {
+        router.push('/journeys');
+        return;
+      }
+      const failedIndexes = new Set(result.failed.map((f) => f.index));
+      const savedIds = new Set(valid.filter((_, i) => !failedIndexes.has(i)).map((i) => i.id));
+      setItems((prev) =>
+        prev
+          .filter((i) => !savedIds.has(i.id))
+          .map((i) => {
+            const idx = valid.findIndex((v) => v.id === i.id);
+            if (idx < 0 || !failedIndexes.has(idx)) return i;
+            return { ...i, status: 'error' as Status, error: result.failed.find((f) => f.index === idx)?.message || 'Failed to save.' };
+          }),
+      );
+      setError(`Saved ${result.createdCount} of ${valid.length}. The rest failed — see the cards below.`);
     } catch (e: any) {
-      setError(e.message || 'Failed to save journey.');
+      setError(e?.message || 'Failed to save journeys.');
     } finally {
-      setConfirming(false);
+      setSaving(false);
     }
   };
 
-  const canConfirm = parsed && parsed.trainName && parsed.fromStation && parsed.toStation;
+  const hasItems = items.length > 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <PageHeader
         eyebrow="Manage"
-        title="Upload Ticket"
-        subtitle="Drop a Bangladesh Railway e-ticket PDF and we'll extract the journey details automatically."
-        actions={parsed ? <Button variant="secondary" onClick={() => { setParsed(null); setFileName(''); }}><IconX /> Start over</Button> : undefined}
+        title="Upload Tickets"
+        subtitle="Drop as many Bangladesh Railway e-ticket PDFs as you like — we'll extract every journey at once."
+        actions={
+          hasItems ? (
+            <Button variant="secondary" onClick={reset} disabled={saving}>
+              <IconX /> Start over
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* Dropzone */}
-      {!parsed && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-          onClick={() => !parsing && inputRef.current?.click()}
-          className={cn(
-            'group relative cursor-pointer overflow-hidden rounded-3xl border-2 border-dashed p-10 text-center transition-all duration-300 sm:p-16 animate-fade-up',
-            dragging
-              ? 'border-brand-400 bg-brand-50/70 shadow-glow'
-              : 'border-ink-200 bg-white/70 hover:border-brand-300 hover:bg-white hover:shadow-card',
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => !parsing && inputRef.current?.click()}
+        className={cn(
+          'group relative cursor-pointer overflow-hidden rounded-3xl border-2 border-dashed text-center transition-all duration-300 animate-fade-up',
+          hasItems ? 'p-6 sm:p-8' : 'p-10 sm:p-16',
+          dragging
+            ? 'border-brand-400 bg-brand-50/70 shadow-glow'
+            : 'border-ink-200 bg-white/70 hover:border-brand-300 hover:bg-white hover:shadow-card',
+        )}
+      >
+        <div className="pointer-events-none absolute inset-x-0 -top-24 h-48 bg-[radial-gradient(50%_60%_at_50%_100%,rgba(99,102,241,0.14),transparent)]" />
+        <div className={cn('relative mx-auto grid place-items-center rounded-3xl bg-gradient-brand text-white shadow-glow', hasItems ? 'h-12 w-12' : 'h-20 w-20')}>
+          {parsing ? (
+            <span className={cn('animate-spin rounded-full border-[3px] border-white/40 border-t-white', hasItems ? 'h-5 w-5' : 'h-7 w-7')} />
+          ) : (
+            <IconUpload className={cn('transition-transform duration-300 group-hover:-translate-y-0.5', hasItems ? 'text-[22px]' : 'text-[34px]')} />
           )}
-        >
-          <div className="pointer-events-none absolute inset-x-0 -top-24 h-48 bg-[radial-gradient(50%_60%_at_50%_100%,rgba(99,102,241,0.14),transparent)]" />
-          <div className="relative mx-auto grid h-20 w-20 place-items-center rounded-3xl bg-gradient-brand text-white shadow-glow">
-            {parsing ? (
-              <span className="h-7 w-7 animate-spin rounded-full border-[3px] border-white/40 border-t-white" />
-            ) : (
-              <IconUpload className="text-[34px] transition-transform duration-300 group-hover:-translate-y-0.5" />
-            )}
-          </div>
-          <h3 className="relative mt-5 text-lg font-bold text-ink-900">
-            {parsing ? 'Reading your ticket…' : dragging ? 'Drop it here' : 'Drag & drop your ticket PDF'}
-          </h3>
-          <p className="relative mt-1.5 text-sm text-ink-500">
-            {parsing ? fileName : 'or click anywhere to browse your files'}
-          </p>
+        </div>
+        <h3 className={cn('relative mt-4 font-bold text-ink-900', hasItems ? 'text-base' : 'mt-5 text-lg')}>
+          {parsing ? 'Reading your tickets…' : dragging ? 'Drop them here' : hasItems ? 'Add more ticket PDFs' : 'Drag & drop your ticket PDFs'}
+        </h3>
+        <p className="relative mt-1.5 text-sm text-ink-500">
+          {parsing ? 'Extracting journey details' : 'Select several PDFs at once — or click anywhere to browse'}
+        </p>
+        {!hasItems && (
           <div className="relative mt-5 flex flex-wrap items-center justify-center gap-2">
             <Badge tone="brand"><IconFile className="text-[12px]" /> PDF only</Badge>
-            <Badge tone="slate">Up to 10 MB</Badge>
-            <Badge tone="emerald"><IconSparkles className="text-[12px]" /> Auto-extracts 10+ fields</Badge>
+            <Badge tone="slate">Up to 10 MB each</Badge>
+            <Badge tone="emerald"><IconSparkles className="text-[12px]" /> Bulk import, 10+ fields each</Badge>
           </div>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-          />
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf"
+          multiple
+          className="hidden"
+          onChange={onPick}
+        />
+      </div>
+
+      {notice && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-sm text-amber-800 animate-scale-in">
+          <IconAlert className="mt-0.5 shrink-0 text-[18px]" />
+          <span>{notice}</span>
         </div>
       )}
 
@@ -125,110 +234,186 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Tips when nothing parsed */}
-      {!parsed && !parsing && (
+      {/* Tips when empty */}
+      {!hasItems && !parsing && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
-            { icon: <IconUpload />, title: 'Drop the PDF', desc: 'Any BD Railway e-ticket PDF from your email or downloads.' },
+            { icon: <IconUpload />, title: 'Drop many PDFs', desc: 'Drag in a whole folder of tickets in one go.' },
             { icon: <IconSearch />, title: 'We extract the data', desc: 'Train, route, class, coach, fare, passenger and PNR.' },
-            { icon: <IconCheck />, title: 'Review & save', desc: 'Confirm the details — edit anything before it is stored.' },
-          ].map((s, i) => (
-            <Card key={s.title} className="p-5 animate-fade-up" >
-              <div style={{ animationDelay: `${i * 70}ms` }}>
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-brand-soft text-brand-600 text-[19px] ring-1 ring-inset ring-brand-100">
-                  {s.icon}
-                </span>
-                <p className="mt-3 text-sm font-semibold text-ink-900">{s.title}</p>
-                <p className="mt-1 text-sm text-ink-500">{s.desc}</p>
-              </div>
+            { icon: <IconCheck />, title: 'Review & save all', desc: 'Fix anything inline, then save every journey at once.' },
+          ].map((s) => (
+            <Card key={s.title} className="p-5 animate-fade-up">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-brand-soft text-brand-600 text-[19px] ring-1 ring-inset ring-brand-100">
+                {s.icon}
+              </span>
+              <p className="mt-3 text-sm font-semibold text-ink-900">{s.title}</p>
+              <p className="mt-1 text-sm text-ink-500">{s.desc}</p>
             </Card>
           ))}
         </div>
       )}
 
-      {/* Preview */}
-      {parsed && (
-        <Card className="animate-scale-in">
-          <CardHeader
-            title="Review & confirm"
-            subtitle="Verify the extracted details — edit any field before saving."
-            icon={<IconFile />}
-            action={
-              <div className="hidden items-center gap-2 sm:flex">
-                <Badge tone="emerald"><IconCheck className="text-[12px]" /> Parsed</Badge>
-                {fileName && <span className="max-w-[180px] truncate text-xs text-ink-400">{fileName}</span>}
-              </div>
-            }
-          />
-
-          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <Label>Train name *</Label>
-              <div className="relative">
-                <IconTrain className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" value={parsed.trainName || ''} onChange={(e) => set('trainName', e.target.value)} placeholder="e.g. EKOTA EXPRESS" />
-              </div>
-            </div>
-            <div><Label>Train number</Label><Input value={parsed.trainNumber || ''} onChange={(e) => set('trainNumber', e.target.value)} placeholder="705" /></div>
-
-            <div>
-              <Label>From station *</Label>
-              <div className="relative">
-                <IconRoute className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" value={parsed.fromStation || ''} onChange={(e) => set('fromStation', e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <Label>To station *</Label>
-              <div className="relative">
-                <IconRoute className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" value={parsed.toStation || ''} onChange={(e) => set('toStation', e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <Label>Journey date *</Label>
-              <div className="relative">
-                <IconCalendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" type="date" value={parsed.journeyDate || ''} onChange={(e) => set('journeyDate', e.target.value)} />
-              </div>
-            </div>
-
-            <div>
-              <Label>Chair class</Label>
-              <Select value={parsed.chairType || 'OTHER'} onChange={(e) => set('chairType', e.target.value)}>
-                {CHAIR_TYPES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
-              </Select>
-            </div>
-            <div><Label>Departure time *</Label><Input type="time" value={parsed.departureTime || ''} onChange={(e) => set('departureTime', e.target.value)} /></div>
-            <div><Label>Arrival time</Label><Input type="time" value={parsed.arrivalTime || ''} onChange={(e) => set('arrivalTime', e.target.value)} /></div>
-
-            <div><Label>Coach / seat</Label><Input value={parsed.coachNo || ''} onChange={(e) => set('coachNo', e.target.value)} placeholder="JA-52" /></div>
-            <div>
-              <Label>Fare (BDT)</Label>
-              <div className="relative">
-                <IconWallet className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" type="number" value={parsed.fare ?? 0} onChange={(e) => set('fare', parseFloat(e.target.value) || 0)} />
-              </div>
-            </div>
-            <div>
-              <Label>PNR / ticket no</Label>
-              <div className="relative">
-                <IconTicket className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
-                <Input className="pl-10" value={parsed.ticketNo || ''} onChange={(e) => set('ticketNo', e.target.value)} />
-              </div>
-            </div>
-
-            <div className="sm:col-span-2 lg:col-span-3"><Label>Passenger name</Label><Input value={parsed.passengerName || ''} onChange={(e) => set('passengerName', e.target.value)} /></div>
+      {/* Review queue */}
+      {hasItems && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-ink-500">Review queue</h2>
+            <Badge tone="slate">{items.length} file{items.length === 1 ? '' : 's'}</Badge>
+            {valid.length > 0 && <Badge tone="emerald"><IconCheck className="text-[12px]" /> {valid.length} ready</Badge>}
+            {invalid.length > 0 && <Badge tone="rose"><IconAlert className="text-[12px]" /> {invalid.length} need attention</Badge>}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-ink-100 px-5 py-4">
-            <Button onClick={confirm} disabled={confirming || !canConfirm} size="lg">
-              <IconCheck /> {confirming ? 'Saving…' : 'Confirm & save journey'}
-            </Button>
-            <Button variant="ghost" onClick={() => { setParsed(null); setFileName(''); }}>Cancel</Button>
-            {!canConfirm && <span className="text-xs text-ink-400">Train name and both stations are required.</span>}
+          {items.map((item, idx) => {
+            const missing = missingFields(item.parsed);
+            const ready = item.status === 'ready' && missing.length === 0;
+            return (
+              <Card key={item.id} className="animate-scale-in overflow-hidden">
+                <div className="flex flex-wrap items-center gap-3 border-b border-ink-100 bg-ink-50/50 px-4 py-3">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-xs font-bold text-ink-500 ring-1 ring-inset ring-ink-200">
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-ink-900">
+                      {item.parsed?.trainName || item.fileName}
+                    </p>
+                    <p className="truncate text-xs text-ink-400">{item.fileName}</p>
+                  </div>
+                  {item.status === 'parsing' && <Badge tone="slate">Parsing…</Badge>}
+                  {item.status === 'error' && <Badge tone="rose"><IconAlert className="text-[12px]" /> Unreadable</Badge>}
+                  {item.status === 'ready' && (ready
+                    ? <Badge tone="emerald"><IconCheck className="text-[12px]" /> Ready</Badge>
+                    : <Badge tone="amber"><IconAlert className="text-[12px]" /> Missing {missing.join(', ')}</Badge>)}
+                  <div className="flex items-center gap-1">
+                    {item.status !== 'parsing' && (
+                      <button
+                        onClick={() => toggleItem(item.id)}
+                        className="rounded-lg px-2.5 py-1 text-xs font-semibold text-brand-600 transition hover:bg-brand-50"
+                      >
+                        {item.expanded ? 'Hide' : 'Edit'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeItem(item.id)}
+                      disabled={saving}
+                      className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 transition hover:bg-white hover:text-rose-600 disabled:pointer-events-none"
+                      title="Remove"
+                    >
+                      <IconTrash className="text-[16px]" />
+                    </button>
+                  </div>
+                </div>
+
+                {item.status === 'parsing' && (
+                  <div className="space-y-2 p-5">
+                    <div className="shimmer-bar h-4 w-2/3 rounded" />
+                    <div className="shimmer-bar h-4 w-1/2 rounded" />
+                  </div>
+                )}
+
+                {item.status === 'error' && (
+                  <p className="px-5 py-4 text-sm text-rose-600">{item.error}</p>
+                )}
+
+                {item.status === 'ready' && item.expanded && (
+                  <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="lg:col-span-2">
+                      <Label>Train name *</Label>
+                      <div className="relative">
+                        <IconTrain className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" value={item.parsed?.trainName || ''} onChange={(e) => setField(item.id, 'trainName', e.target.value)} placeholder="e.g. EKOTA EXPRESS" />
+                      </div>
+                    </div>
+                    <div><Label>Train number</Label><Input value={item.parsed?.trainNumber || ''} onChange={(e) => setField(item.id, 'trainNumber', e.target.value)} placeholder="705" /></div>
+
+                    <div>
+                      <Label>From station *</Label>
+                      <div className="relative">
+                        <IconRoute className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" value={item.parsed?.fromStation || ''} onChange={(e) => setField(item.id, 'fromStation', e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>To station *</Label>
+                      <div className="relative">
+                        <IconRoute className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" value={item.parsed?.toStation || ''} onChange={(e) => setField(item.id, 'toStation', e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Journey date *</Label>
+                      <div className="relative">
+                        <IconCalendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" type="date" value={item.parsed?.journeyDate || ''} onChange={(e) => setField(item.id, 'journeyDate', e.target.value)} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label>Chair class</Label>
+                      <Select value={item.parsed?.chairType || 'OTHER'} onChange={(e) => setField(item.id, 'chairType', e.target.value)}>
+                        {CHAIR_TYPES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+                      </Select>
+                    </div>
+                    <div><Label>Departure time *</Label><Input type="time" value={item.parsed?.departureTime || ''} onChange={(e) => setField(item.id, 'departureTime', e.target.value)} /></div>
+                    <div><Label>Arrival time</Label><Input type="time" value={item.parsed?.arrivalTime || ''} onChange={(e) => setField(item.id, 'arrivalTime', e.target.value)} /></div>
+
+                    <div><Label>Coach / seat</Label><Input value={item.parsed?.coachNo || ''} onChange={(e) => setField(item.id, 'coachNo', e.target.value)} placeholder="JA-52" /></div>
+                    <div>
+                      <Label>Fare (BDT)</Label>
+                      <div className="relative">
+                        <IconWallet className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" type="number" value={item.parsed?.fare ?? 0} onChange={(e) => setField(item.id, 'fare', parseFloat(e.target.value) || 0)} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>PNR / ticket no</Label>
+                      <div className="relative">
+                        <IconTicket className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-ink-400" />
+                        <Input className="pl-10" value={item.parsed?.ticketNo || ''} onChange={(e) => setField(item.id, 'ticketNo', e.target.value)} />
+                      </div>
+                    </div>
+
+                    <div className="sm:col-span-2 lg:col-span-3"><Label>Passenger name</Label><Input value={item.parsed?.passengerName || ''} onChange={(e) => setField(item.id, 'passengerName', e.target.value)} /></div>
+                  </div>
+                )}
+
+                {item.status === 'ready' && !item.expanded && (
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 px-5 py-3.5 text-sm text-ink-600">
+                    <span className="font-medium">
+                      {item.parsed?.fromStation || '—'} <span className="text-ink-300">→</span> {item.parsed?.toStation || '—'}
+                    </span>
+                    <span className="text-ink-400">{item.parsed?.journeyDate || 'no date'} · {item.parsed?.departureTime || '--:--'}</span>
+                    <span className="text-ink-400">{(item.parsed?.chairType || 'OTHER').replace(/_/g, ' ')}</span>
+                    <span className="font-semibold text-ink-800">৳ {Number(item.parsed?.fare || 0).toLocaleString('en-IN')}</span>
+                    {item.parsed?.passengerName && <span className="text-ink-400">{item.parsed.passengerName}</span>}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sticky action bar */}
+      {hasItems && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-200/70 bg-white/85 backdrop-blur px-4 py-3.5 shadow-card-hover sm:px-6">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-sm text-ink-600">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-brand-soft text-brand-600 ring-1 ring-inset ring-brand-100">
+                <IconTicket />
+              </span>
+              <span>
+                <strong className="text-ink-900">{valid.length}</strong> journey{valid.length === 1 ? '' : 's'} ready to save
+                {invalid.length > 0 && <> · <span className="text-amber-600">{invalid.length} skipped (incomplete)</span></>}
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Button variant="ghost" onClick={reset} disabled={saving}>Cancel</Button>
+              <Button size="lg" onClick={saveAll} disabled={saving || parsing || valid.length === 0}>
+                <IconCheck /> {saving ? 'Saving…' : `Save ${valid.length} journey${valid.length === 1 ? '' : 's'}`}
+              </Button>
+            </div>
           </div>
-        </Card>
+        </div>
       )}
     </div>
   );

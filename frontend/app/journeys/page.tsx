@@ -9,11 +9,11 @@ import {
 } from '@/lib/utils';
 import {
   Card, CardHeader, Badge, Button, Input, Select, Label,
-  PageHeader, Skeleton, EmptyState, cn,
+  PageHeader, Skeleton, EmptyState, Checkbox, ConfirmDialog, cn,
 } from '@/components/ui';
 import {
   IconSearch, IconDownload, IconTrain, IconRoute, IconTrash, IconPencil,
-  IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight,
+  IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight, IconCheck,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
@@ -28,17 +28,49 @@ export default function JourneysPage() {
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
     const params: Record<string, string> = {};
     Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v; });
-    api.getJourneys(params).then(setJourneys).finally(() => setLoading(false));
+    api.getJourneys(params)
+      .then((list) => {
+        setJourneys(list);
+        const ids = new Set(list.map((j) => j.id));
+        setSelected((prev) => prev.filter((id) => ids.has(id)));
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, [filters]);
 
   const activeCount = Object.values(filters).filter(Boolean).length;
+
+  const allSelected = journeys.length > 0 && selected.length === journeys.length;
+
+  const toggle = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const toggleAll = () => setSelected(allSelected ? [] : journeys.map((j) => j.id));
+
+  const askDelete = (ids: string[]) => { if (ids.length) setPendingIds(ids); };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.deleteJourneys(pendingIds);
+      setSelected((prev) => prev.filter((id) => !pendingIds.includes(id)));
+      setPendingIds([]);
+      load();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const pendingJourneys = journeys.filter((j) => pendingIds.includes(j.id));
 
   const exportCsv = () => {
     const headers = ['Train', 'From', 'To', 'Date', 'Departure', 'Arrival', 'Class', 'Coach', 'Fare', 'Passenger', 'Day/Night'];
@@ -54,22 +86,22 @@ export default function JourneysPage() {
     a.click();
   };
 
-  const del = async (id: string) => {
-    if (!confirm('Delete this journey?')) return;
-    await api.deleteJourney(id);
-    load();
-  };
-
   const set = (k: keyof typeof filters, v: string) => setFilters({ ...filters, [k]: v });
 
   return (
-    <div className="space-y-6">
+    <div className={cn('space-y-6', selected.length > 0 && 'pb-24')}>
       <PageHeader
         eyebrow="Manage"
         title="All Journeys"
         subtitle={loading ? 'Loading journeys…' : `${journeys.length} journey${journeys.length === 1 ? '' : 's'} found`}
         actions={
           <>
+            {journeys.length > 0 && (
+              <Button variant="secondary" onClick={toggleAll}>
+                <Checkbox checked={allSelected} readOnly tabIndex={-1} className="pointer-events-none" />
+                {allSelected ? 'Clear all' : 'Select all'}
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setShowFilters((s) => !s)} className="lg:hidden">
               <IconFilter /> Filters{activeCount > 0 && ` (${activeCount})`}
             </Button>
@@ -153,6 +185,13 @@ export default function JourneysPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-ink-100 bg-ink-50/60 text-left text-xs font-semibold uppercase tracking-wide text-ink-500">
+                    <th className="w-10 py-3.5 pl-5 pr-1">
+                      <Checkbox
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all journeys"
+                      />
+                    </th>
                     <th className="px-5 py-3.5 font-semibold">Train</th>
                     <th className="px-5 py-3.5 font-semibold">Route</th>
                     <th className="px-5 py-3.5 font-semibold">Date & time</th>
@@ -164,7 +203,14 @@ export default function JourneysPage() {
                 </thead>
                 <tbody className="divide-y divide-ink-100">
                   {journeys.map((j) => (
-                    <tr key={j.id} className="group transition hover:bg-brand-50/40">
+                    <tr key={j.id} className={cn('group transition', selected.includes(j.id) ? 'bg-brand-50/60' : 'hover:bg-brand-50/40')}>
+                      <td className="py-3.5 pl-5 pr-1">
+                        <Checkbox
+                          checked={selected.includes(j.id)}
+                          onChange={() => toggle(j.id)}
+                          aria-label={`Select ${j.trainName}`}
+                        />
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white text-[16px]', gradientFor(j.trainName))}>
@@ -204,7 +250,7 @@ export default function JourneysPage() {
                           <Link href={`/journeys/${j.id}`} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="Edit">
                             <IconPencil className="text-[16px]" />
                           </Link>
-                          <button onClick={() => del(j.id)} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-rose-600" title="Delete">
+                          <button onClick={() => askDelete([j.id])} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-rose-600" title="Delete">
                             <IconTrash className="text-[16px]" />
                           </button>
                         </div>
@@ -218,9 +264,23 @@ export default function JourneysPage() {
 
           {/* Mobile cards */}
           <div className="space-y-3 md:hidden">
+            <div className="flex items-center justify-between px-1">
+              <label className="flex items-center gap-2 text-sm font-semibold text-ink-600">
+                <Checkbox checked={allSelected} onChange={toggleAll} /> Select all
+              </label>
+              {selected.length > 0 && (
+                <span className="text-xs font-semibold text-brand-600">{selected.length} selected</span>
+              )}
+            </div>
             {journeys.map((j) => (
-              <Card key={j.id} hover className="p-4 animate-fade-up">
+              <Card key={j.id} hover className={cn('p-4 animate-fade-up', selected.includes(j.id) && 'border-brand-300 bg-brand-50/40')}>
                 <div className="flex items-start gap-3">
+                  <Checkbox
+                    checked={selected.includes(j.id)}
+                    onChange={() => toggle(j.id)}
+                    className="mt-1"
+                    aria-label={`Select ${j.trainName}`}
+                  />
                   <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white text-[18px]', gradientFor(j.trainName))}>
                     <IconTrain />
                   </span>
@@ -244,7 +304,7 @@ export default function JourneysPage() {
                   <Link href={`/journeys/${j.id}`} className="flex-1">
                     <Button variant="secondary" size="sm" className="w-full"><IconPencil className="text-[14px]" /> Edit</Button>
                   </Link>
-                  <Button variant="ghost" size="sm" onClick={() => del(j.id)} className="text-rose-600 hover:bg-rose-50">
+                  <Button variant="ghost" size="sm" onClick={() => askDelete([j.id])} className="text-rose-600 hover:bg-rose-50">
                     <IconTrash className="text-[14px]" />
                   </Button>
                 </div>
@@ -253,6 +313,60 @@ export default function JourneysPage() {
           </div>
         </>
       )}
+
+      {/* Bulk action bar */}
+      {selected.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-200/70 bg-white/85 px-4 py-3.5 shadow-card-hover backdrop-blur sm:px-6">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-sm text-ink-600">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-brand-soft text-brand-600 ring-1 ring-inset ring-brand-100">
+                <IconCheck />
+              </span>
+              <span><strong className="text-ink-900">{selected.length}</strong> journey{selected.length === 1 ? '' : 's'} selected</span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Button variant="ghost" onClick={() => setSelected([])} disabled={deleting}>Clear selection</Button>
+              <Button variant="danger" onClick={() => askDelete(selected)} disabled={deleting}>
+                <IconTrash /> Delete {selected.length === 1 ? 'journey' : `${selected.length} journeys`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={pendingIds.length > 0}
+        title={pendingIds.length > 1 ? `Delete ${pendingIds.length} journeys?` : 'Delete this journey?'}
+        description={
+          pendingIds.length > 1
+            ? 'These journeys will be permanently removed from your history. This action cannot be undone.'
+            : 'This journey will be permanently removed from your history. This action cannot be undone.'
+        }
+        confirmLabel={pendingIds.length > 1 ? `Delete ${pendingIds.length} journeys` : 'Delete journey'}
+        loadingLabel="Deleting…"
+        loading={deleting}
+        onCancel={() => setPendingIds([])}
+        onConfirm={confirmDelete}
+      >
+        {pendingJourneys.length > 0 && (
+          <ul className="max-h-52 space-y-1.5 overflow-y-auto rounded-2xl border border-rose-100 bg-rose-50/60 p-3">
+            {pendingJourneys.slice(0, 4).map((j) => (
+              <li key={j.id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate font-semibold text-ink-800">{j.trainName}</span>
+                <span className="shrink-0 text-xs text-ink-500">
+                  {j.fromStation} → {j.toStation} · {formatDate(j.journeyDate)}
+                </span>
+              </li>
+            ))}
+            {pendingJourneys.length > 4 && (
+              <li className="pt-0.5 text-xs font-semibold text-rose-600">
+                + {pendingJourneys.length - 4} more journey{pendingJourneys.length - 4 === 1 ? '' : 's'}
+              </li>
+            )}
+          </ul>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }
