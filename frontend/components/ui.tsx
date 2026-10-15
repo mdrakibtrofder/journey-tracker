@@ -285,6 +285,80 @@ export function Skeleton({ className = '' }: { className?: string }) {
   return <div className={cn('shimmer-bar rounded-lg', className)} />;
 }
 
+/* ---------------------------------- Modal -------------------------------- */
+
+export function Modal({
+  open,
+  onClose,
+  header,
+  footer,
+  size = 'md',
+  dismissible = true,
+  closeClassName = '',
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  header?: ReactNode;
+  footer?: ReactNode;
+  size?: 'sm' | 'md' | 'lg';
+  dismissible?: boolean;
+  closeClassName?: string;
+  children?: ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && dismissible) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open, dismissible, onClose]);
+
+  if (!open) return null;
+
+  const widths = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-3xl' };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-4 sm:items-center">
+      <div
+        className="absolute inset-0 bg-ink-950/45 backdrop-blur-sm animate-fade-in"
+        onClick={() => dismissible && onClose()}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          'relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-3xl border border-ink-200/70 bg-white shadow-card-hover animate-scale-in',
+          widths[size],
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => dismissible && onClose()}
+          disabled={!dismissible}
+          aria-label="Close"
+          className={cn(
+            'absolute right-4 top-4 z-10 grid h-8 w-8 place-items-center rounded-lg text-ink-400 transition hover:bg-ink-100 hover:text-ink-700 disabled:pointer-events-none',
+            closeClassName,
+          )}
+        >
+          <IconX className="text-[16px]" />
+        </button>
+
+        {header}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {footer && <div className="shrink-0 border-t border-ink-100 bg-ink-50/60 px-5 py-4">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------ Confirm dialog --------------------------- */
 
 export function ConfirmDialog({
@@ -312,47 +386,16 @@ export function ConfirmDialog({
   onCancel: () => void;
   children?: ReactNode;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !loading) onCancel();
-    };
-    document.addEventListener('keydown', onKey);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [open, loading, onCancel]);
-
-  if (!open) return null;
-
   const dismiss = () => { if (!loading) onCancel(); };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center p-4 sm:items-center">
-      <div
-        className="absolute inset-0 bg-ink-950/45 backdrop-blur-sm animate-fade-in"
-        onClick={dismiss}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        className="relative w-full max-w-md animate-scale-in overflow-hidden rounded-3xl border border-ink-200/70 bg-white shadow-card-hover"
-      >
-        <button
-          type="button"
-          onClick={dismiss}
-          disabled={loading}
-          aria-label="Close"
-          className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-lg text-ink-400 transition hover:bg-ink-100 hover:text-ink-700 disabled:pointer-events-none"
-        >
-          <IconX className="text-[16px]" />
-        </button>
-
-        <div className="flex items-start gap-4 p-6 pr-14">
+    <Modal
+      open={open}
+      onClose={dismiss}
+      size="sm"
+      dismissible={!loading}
+      header={
+        <div className="flex shrink-0 items-start gap-4 p-6 pr-14">
           <span
             className={cn(
               'grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-[22px] text-white shadow-glow',
@@ -362,16 +405,13 @@ export function ConfirmDialog({
             <IconAlert />
           </span>
           <div className="min-w-0">
-            <h3 id="confirm-dialog-title" className="text-lg font-bold leading-tight text-ink-900">
-              {title}
-            </h3>
+            <h3 className="text-lg font-bold leading-tight text-ink-900">{title}</h3>
             {description && <div className="mt-1.5 text-sm text-ink-500">{description}</div>}
           </div>
         </div>
-
-        {children && <div className="-mt-2 px-6 pb-5">{children}</div>}
-
-        <div className="flex flex-col-reverse gap-2.5 border-t border-ink-100 bg-ink-50/60 px-5 py-4 sm:flex-row sm:justify-end">
+      }
+      footer={
+        <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={dismiss} disabled={loading}>
             {cancelLabel}
           </Button>
@@ -382,7 +422,9 @@ export function ConfirmDialog({
             {loading ? loadingLabel : confirmLabel}
           </Button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      {children && <div className="px-6 pb-5 -mt-2">{children}</div>}
+    </Modal>
   );
 }

@@ -11,9 +11,10 @@ import {
   Card, CardHeader, Badge, Button, Input, Select, Label,
   PageHeader, Skeleton, EmptyState, Checkbox, ConfirmDialog, cn,
 } from '@/components/ui';
+import { JourneyPreviewModal } from '@/components/JourneyPreview';
 import {
   IconSearch, IconDownload, IconTrain, IconRoute, IconTrash, IconPencil,
-  IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight, IconCheck,
+  IconFilter, IconSun, IconMoon, IconUpload, IconX, IconArrowRight, IconCheck, IconEye,
 } from '@/components/icons';
 
 const CHAIR_TYPES = ['AC_B', 'AC_S', 'SNIGDHA', 'F_BERTH', 'F_SEAT', 'SHOVAN', 'SHOVAN_CHAIR', 'LUXURY', 'OTHER'];
@@ -31,6 +32,7 @@ export default function JourneysPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [previewing, setPreviewing] = useState<Journey | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -247,7 +249,10 @@ export default function JourneysPage() {
                       <td className="px-5 py-3.5"><Badge tone={sourceTone(j.source)}>{j.source}</Badge></td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                          <Link href={`/journeys/${j.id}`} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="Edit">
+                          <button onClick={() => setPreviewing(j)} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="Preview">
+                            <IconEye className="text-[16px]" />
+                          </button>
+                          <Link href={`/journeys/${j.id}?edit=1`} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-brand-600" title="Edit">
                             <IconPencil className="text-[16px]" />
                           </Link>
                           <button onClick={() => askDelete([j.id])} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-rose-600" title="Delete">
@@ -301,7 +306,10 @@ export default function JourneysPage() {
                   </div>
                 </div>
                 <div className="mt-3 flex gap-2 border-t border-ink-100 pt-3">
-                  <Link href={`/journeys/${j.id}`} className="flex-1">
+                  <Button variant="secondary" size="sm" onClick={() => setPreviewing(j)}>
+                    <IconEye className="text-[14px]" /> Preview
+                  </Button>
+                  <Link href={`/journeys/${j.id}?edit=1`} className="flex-1">
                     <Button variant="secondary" size="sm" className="w-full"><IconPencil className="text-[14px]" /> Edit</Button>
                   </Link>
                   <Button variant="ghost" size="sm" onClick={() => askDelete([j.id])} className="text-rose-600 hover:bg-rose-50">
@@ -333,6 +341,13 @@ export default function JourneysPage() {
           </div>
         </div>
       )}
+
+      {/* Preview */}
+      <JourneyPreviewModal
+        journey={previewing}
+        open={!!previewing}
+        onClose={() => setPreviewing(null)}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog
