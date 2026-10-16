@@ -796,24 +796,49 @@ function SankeyLink(props: any) {
 export function SankeyDiagram({ nodes, links }: { nodes: { name: string }[]; links: { source: string; target: string; value: number }[] }) {
   const data = useMemo(() => {
     if (!links.length) return null;
-    const index = new Map(nodes.map((n, i) => [n.name, i]));
-    const usedLinks = links
-      .filter((l) => index.has(l.source) && index.has(l.target) && l.value > 0)
-      .map((l) => ({ source: index.get(l.source)!, target: index.get(l.target)!, value: l.value }));
-    if (!usedLinks.length) return null;
-    const used = new Set<number>();
-    usedLinks.forEach((l) => {
+
+    // Recharts' Sankey resolves node depths with unbounded recursion, so a cyclic
+    // graph (return trips give both A→B and B→A) blows the call stack. Keep only
+    // the highest-value edges that keep the graph acyclic.
+    const candidates = links
+      .filter((l) => l.source !== l.target && l.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    const adj = new Map<string, Set<string>>();
+    const reaches = (from: string, to: string) => {
+      const stack = [from];
+      const seen = new Set([from]);
+      while (stack.length) {
+        const cur = stack.pop()!;
+        if (cur === to) return true;
+        for (const nxt of adj.get(cur) || []) {
+          if (!seen.has(nxt)) {
+            seen.add(nxt);
+            stack.push(nxt);
+          }
+        }
+      }
+      return false;
+    };
+
+    const kept = candidates.filter((l) => {
+      if (reaches(l.target, l.source)) return false;
+      if (!adj.has(l.source)) adj.set(l.source, new Set());
+      adj.get(l.source)!.add(l.target);
+      return true;
+    });
+    if (!kept.length) return null;
+
+    const used = new Set<string>();
+    kept.forEach((l) => {
       used.add(l.source);
       used.add(l.target);
     });
-    const names = nodes.filter((_, i) => used.has(i)).map((n) => n.name);
-    const remap = new Map<number, number>();
-    nodes.forEach((n, i) => {
-      if (used.has(i)) remap.set(i, names.indexOf(n.name));
-    });
+    const names = [...used];
+    const remap = new Map(names.map((name, i) => [name, i]));
     return {
       nodes: names.map((name) => ({ name })),
-      links: usedLinks.map((l) => ({ source: remap.get(l.source)!, target: remap.get(l.target)!, value: l.value })),
+      links: kept.map((l) => ({ source: remap.get(l.source)!, target: remap.get(l.target)!, value: l.value })),
     };
   }, [nodes, links]);
 
