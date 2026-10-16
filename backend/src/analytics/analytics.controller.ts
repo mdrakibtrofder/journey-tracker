@@ -1,28 +1,26 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { AnalyticsQueryDto, JourneysTableQueryDto } from './dto/analytics-query.dto';
 
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Get('summary')
-  summary() { return this.analyticsService.summary(); }
+  /** One payload with every KPI, series and distribution both pages render. */
+  @Get('overview')
+  overview(@Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.overview(query);
+  }
 
-  @Get('by-station')
-  byStation() { return this.analyticsService.byStation(); }
+  /** Filter options, scoped to the active filters. */
+  @Get('facets')
+  facets(@Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.facets(query);
+  }
 
-  @Get('by-train')
-  byTrain() { return this.analyticsService.byTrain(); }
-
-  @Get('by-chair-type')
-  byChairType() { return this.analyticsService.byChairType(); }
-
-  @Get('by-day-night')
-  byDayNight() { return this.analyticsService.byDayNight(); }
-
-  @Get('by-month')
-  byMonth() { return this.analyticsService.byMonth(); }
-
-  @Get('routes')
-  routes() { return this.analyticsService.routes(); }
+  /** Filtered, sorted and paginated rows for the analytics data table. */
+  @Get('journeys')
+  journeys(@Query() query: JourneysTableQueryDto) {
+    return this.analyticsService.journeysTable(query);
+  }
 }

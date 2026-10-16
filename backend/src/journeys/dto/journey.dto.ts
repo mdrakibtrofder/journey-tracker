@@ -9,7 +9,6 @@ export class CreateJourneyDto {
   @IsNotEmpty() @IsString() toStation: string;
   @IsNotEmpty() @IsDateString() journeyDate: string;
   @IsNotEmpty() @IsString() departureTime: string;
-  @IsOptional() @IsString() arrivalTime?: string;
   @IsOptional() @IsEnum(ChairType) chairType?: ChairType;
   @IsOptional() @IsString() coachNo?: string;
   @IsOptional() @IsString() seatNo?: string;
@@ -30,7 +29,6 @@ export class UpdateJourneyDto {
   @IsOptional() @IsString() toStation?: string;
   @IsOptional() @IsDateString() journeyDate?: string;
   @IsOptional() @IsString() departureTime?: string;
-  @IsOptional() @IsString() arrivalTime?: string;
   @IsOptional() @IsEnum(ChairType) chairType?: ChairType;
   @IsOptional() @IsString() coachNo?: string;
   @IsOptional() @IsString() seatNo?: string;

@@ -11,7 +11,6 @@ export interface ParsedTicket {
   toStation?: string;
   journeyDate?: string;
   departureTime?: string;
-  arrivalTime?: string;
   chairType?: string;
   coachNo?: string;
   seatNo?: string;

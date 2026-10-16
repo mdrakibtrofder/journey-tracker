@@ -39,7 +39,6 @@ export class TicketsService {
       toStation: parsed.toStation || '',
       journeyDate: parsed.journeyDate || new Date().toISOString(),
       departureTime: parsed.departureTime || '00:00',
-      arrivalTime: parsed.arrivalTime,
       chairType: parsed.chairType as any,
       coachNo: parsed.coachNo,
       seatNo: parsed.seatNo,

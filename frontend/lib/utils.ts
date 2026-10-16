@@ -32,13 +32,6 @@ export function formatFare(n: number): string {
   return `৳ ${Number(n || 0).toLocaleString('en-IN')}`;
 }
 
-export function formatDuration(mins?: number | null): string {
-  if (!mins) return '—';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 export function chairClassLabel(c: string): string {
   return (c || '').replace(/_/g, ' ');
 }

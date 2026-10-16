@@ -8,14 +8,6 @@ function parseTime(time: string): number {
   return h * 60 + m;
 }
 
-function computeDuration(dep: string, arr?: string): number | null {
-  if (!arr) return null;
-  let d = parseTime(dep);
-  let a = parseTime(arr);
-  if (a < d) a += 24 * 60; // overnight
-  return a - d;
-}
-
 function computeDayNight(dep: string): string {
   const mins = parseTime(dep);
   return mins >= 360 && mins < 1080 ? 'DAY' : 'NIGHT';
@@ -68,7 +60,6 @@ export class JourneysService {
       ticketNo,
       chairType: dto.chairType || ChairType.OTHER,
       dayNight: computeDayNight(dto.departureTime),
-      durationMins: computeDuration(dto.departureTime, dto.arrivalTime),
       journeyDate: new Date(dto.journeyDate),
       fare: dto.fare ?? 0,
     };
@@ -164,13 +155,6 @@ export class JourneysService {
   async update(id: string, dto: UpdateJourneyDto) {
     const data: any = { ...dto };
     if (dto.departureTime) data.dayNight = computeDayNight(dto.departureTime);
-    if (dto.departureTime || dto.arrivalTime) {
-      const existing = await this.findOne(id);
-      data.durationMins = computeDuration(
-        dto.departureTime || existing.departureTime,
-        dto.arrivalTime || existing.arrivalTime || undefined,
-      );
-    }
     if (dto.journeyDate) data.journeyDate = new Date(dto.journeyDate);
     if (dto.issuedAt) data.issuedAt = new Date(dto.issuedAt);
     return this.prisma.journey.update({ where: { id }, data });

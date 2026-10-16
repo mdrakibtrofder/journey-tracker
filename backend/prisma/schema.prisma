@@ -33,8 +33,6 @@ model Journey {
   toStation      String
   journeyDate    DateTime
   departureTime  String
-  arrivalTime    String?
-  durationMins   Int?
   dayNight       String     @default("DAY")
   chairType      ChairType  @default(OTHER)
   coachNo        String?
